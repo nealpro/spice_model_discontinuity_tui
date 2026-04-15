@@ -1,0 +1,15 @@
+[project]
+name = "spice-discontinuity"
+version = "0.1.0"
+description = "Toolkit scaffold for finding, generating, and injecting SPICE simulation discontinuities."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+tui = [
+    "textual>=8.2.3",
+]
+
+[project.scripts]
+spice-tui = "app:main"

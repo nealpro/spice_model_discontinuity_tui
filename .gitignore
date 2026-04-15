@@ -1,0 +1,25 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# uv and virtual environments
+.venv/
+.uv-cache/
+
+# OS/editor noise
+.DS_Store
+.idea/
+.vscode/
+
+# SPICE and simulation artifacts: do not commit generated/raw data
+*.csv
+*.raw
+*.txt
+
+# Keep dependency manifest text files tracked
+!requirements.txt
+!requirements-*.txt
+
+# Testing directory
+tests/

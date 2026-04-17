@@ -23,3 +23,7 @@ __pycache__/
 
 # Testing directory
 tests/
+
+# Notes
+
+notes/

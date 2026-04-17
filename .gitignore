@@ -21,8 +21,8 @@ __pycache__/
 !requirements.txt
 !requirements-*.txt
 
-# Testing directory
-tests/
+# Testing files directory
+tests/files/*
 
 # Notes
 

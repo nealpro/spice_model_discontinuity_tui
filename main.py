@@ -1,7 +1,7 @@
-"""Wrapper script for the SPICE discontinuity toolkit package."""
+"""Wrapper script for the SPICE discontinuity CLI."""
 
-from app import main
+from spice_cli import main
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

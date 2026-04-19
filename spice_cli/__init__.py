@@ -15,6 +15,7 @@ import numpy as np
 
 from .devices import Device, active_device
 from spice_discontinuity.find import DetectionResult, detect as find_detect
+from spice_discontinuity.inject import inject_random_spikes
 
 CONFIG_PATH = Path("~/.config/spice_cli/config.toml").expanduser()
 
@@ -71,6 +72,41 @@ def _build_parser() -> argparse.ArgumentParser:
         "--device",
         default=None,
         help="Override the active device name (otherwise uses [analysis].device from config).",
+    )
+    parser.add_argument(
+        "--inject",
+        action="store_true",
+        help="Inject mode: write a new CSV with random spikes added to a "
+        "numeric column. Bypasses config and detection entirely. Requires -o.",
+    )
+    parser.add_argument(
+        "-o",
+        "--output",
+        default=None,
+        help="Inject mode: destination CSV path.",
+    )
+    parser.add_argument(
+        "--column",
+        default=None,
+        help="Inject mode: column to corrupt (default: last numeric column).",
+    )
+    parser.add_argument(
+        "--count",
+        type=int,
+        default=None,
+        help="Inject mode: number of spikes (default: 1%% of samples, min 1).",
+    )
+    parser.add_argument(
+        "--magnitude",
+        type=float,
+        default=None,
+        help="Inject mode: spike magnitude (default: 10%% of signal peak-to-peak).",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Inject mode: RNG seed for reproducible spike placement.",
     )
     parser.add_argument(
         "input",
@@ -403,6 +439,144 @@ def _with_output_dir(plot_config, new_dir: Path):
     return replace(plot_config, output_dir=new_dir)
 
 
+def _open_input(
+    input_path: str | None, input_stream: TextIO, error_stream: TextIO
+) -> tuple[TextIO, bool] | None:
+    """Return (stream, should_close) or None on error (message already printed)."""
+    if input_path and input_path != "-":
+        try:
+            handle = Path(input_path).open(encoding="utf-8", newline="")
+        except OSError as exc:
+            print(f"error: {exc}", file=error_stream)
+            return None
+        return handle, True
+    is_tty = getattr(input_stream, "isatty", lambda: False)
+    if is_tty():
+        print(
+            "error: no input provided. Pass a file path or pipe CSV data on stdin.",
+            file=error_stream,
+        )
+        return None
+    return input_stream, False
+
+
+def _pick_target_column(
+    fieldnames: Sequence[str], rows: list[dict[str, str]]
+) -> str | None:
+    """Return the rightmost column whose cells are mostly float-parseable."""
+    for name in reversed(list(fieldnames)):
+        non_empty = 0
+        numeric = 0
+        for row in rows:
+            raw = (row.get(name) or "").strip()
+            if not raw:
+                continue
+            non_empty += 1
+            try:
+                float(raw)
+                numeric += 1
+            except ValueError:
+                pass
+        if non_empty and numeric / non_empty >= 0.9:
+            return name
+    return None
+
+
+def _run_inject(
+    args: argparse.Namespace,
+    input_stream: TextIO,
+    output_stream: TextIO,
+    error_stream: TextIO,
+) -> int:
+    if not args.output:
+        print("error: --inject requires -o/--output.", file=error_stream)
+        return 2
+
+    opened = _open_input(args.input, input_stream, error_stream)
+    if opened is None:
+        return 2
+    handle, should_close = opened
+    try:
+        reader = csv.DictReader(handle)
+        fieldnames = reader.fieldnames
+        if not fieldnames:
+            print("error: CSV input has no header row.", file=error_stream)
+            return 2
+        rows = list(reader)
+    except OSError as exc:
+        print(f"error: {exc}", file=error_stream)
+        return 2
+    finally:
+        if should_close:
+            handle.close()
+
+    if args.column is not None:
+        if args.column not in fieldnames:
+            print(
+                f"error: column {args.column!r} not found in CSV header.",
+                file=error_stream,
+            )
+            return 2
+        target = args.column
+    else:
+        target = _pick_target_column(fieldnames, rows)
+        if target is None:
+            print("error: no numeric column found to inject into.", file=error_stream)
+            return 2
+
+    indexed: list[tuple[int, float]] = []
+    for i, row in enumerate(rows):
+        raw = (row.get(target) or "").strip()
+        if not raw:
+            continue
+        try:
+            indexed.append((i, float(raw)))
+        except ValueError:
+            continue
+
+    if not indexed:
+        print(
+            f"error: column {target!r} has no numeric values.", file=error_stream
+        )
+        return 2
+
+    values = [v for _, v in indexed]
+    count = args.count if args.count is not None else max(1, int(0.01 * len(values)))
+    if args.magnitude is not None:
+        magnitude = args.magnitude
+    else:
+        span = max(values) - min(values)
+        magnitude = 0.1 * span if span > 0 else 1.0
+
+    try:
+        perturbed = inject_random_spikes(values, count, magnitude, args.seed)
+    except (ValueError, IndexError) as exc:
+        print(f"error: {exc}", file=error_stream)
+        return 2
+
+    overrides: dict[int, str] = {}
+    for (row_idx, _), new_val in zip(indexed, perturbed):
+        overrides[row_idx] = f"{new_val:.5e}"
+
+    try:
+        with Path(args.output).open("w", encoding="utf-8", newline="") as out:
+            writer = csv.DictWriter(out, fieldnames=list(fieldnames))
+            writer.writeheader()
+            for i, row in enumerate(rows):
+                if i in overrides:
+                    row = {**row, target: overrides[i]}
+                writer.writerow(row)
+    except OSError as exc:
+        print(f"error: {exc}", file=error_stream)
+        return 2
+
+    print(
+        f'injected {count} spikes (mag={magnitude:g}) into "{target}" -> {args.output}',
+        file=output_stream,
+    )
+    return 0
+
+
 def main(
     argv: Sequence[str] | None = None,
     stdin: TextIO | None = None,
@@ -415,6 +589,9 @@ def main(
     input_stream = stdin if stdin is not None else sys.stdin
     output_stream = stdout if stdout is not None else sys.stdout
     error_stream = stderr if stderr is not None else sys.stderr
+
+    if args.inject:
+        return _run_inject(args, input_stream, output_stream, error_stream)
 
     config = _load_config()
     detection_cfg = config.get("detection") or {}

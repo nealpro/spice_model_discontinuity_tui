@@ -4,7 +4,17 @@ version = "0.1.0"
 description = "Toolkit scaffold for finding, generating, and injecting SPICE simulation discontinuities."
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = ["numpy", "matplotlib", "pandas"]
+dependencies = [
+    "numpy",
+    "matplotlib",
+    "pandas",
+    "scipy",
+]
+
+[project.optional-dependencies]
+mcp = [
+    "mcp[cli]>=1.2.0",
+]
 
 [project.scripts]
 spice-find = "spice_cli:main"

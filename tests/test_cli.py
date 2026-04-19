@@ -14,7 +14,11 @@ class TestSpiceFindCli(unittest.TestCase):
 
             out = io.StringIO()
             err = io.StringIO()
-            code = main(["-s", "1.0", str(path)], stdout=out, stderr=err)
+            code = main(
+                ["--method", "simple", "-s", "1.0", str(path)],
+                stdout=out,
+                stderr=err,
+            )
 
             self.assertEqual(code, 0)
             self.assertIn("Analyzed 1 numeric column(s).", out.getvalue())
@@ -26,7 +30,12 @@ class TestSpiceFindCli(unittest.TestCase):
         err = io.StringIO()
         stdin = io.StringIO("idrain\n0\n0.1\n2.3\n")
 
-        code = main(["-s", "2.0"], stdin=stdin, stdout=out, stderr=err)
+        code = main(
+            ["--method", "simple", "-s", "2.0"],
+            stdin=stdin,
+            stdout=out,
+            stderr=err,
+        )
 
         self.assertEqual(code, 0)
         self.assertIn("idrain: 1", out.getvalue())
@@ -37,7 +46,12 @@ class TestSpiceFindCli(unittest.TestCase):
         err = io.StringIO()
         stdin = io.StringIO("v\n1\n2\n")
 
-        code = main(["-s", "0"], stdin=stdin, stdout=out, stderr=err)
+        code = main(
+            ["--method", "simple", "-s", "0"],
+            stdin=stdin,
+            stdout=out,
+            stderr=err,
+        )
 
         self.assertEqual(code, 2)
         self.assertIn("must be greater than 0", err.getvalue())
@@ -47,10 +61,35 @@ class TestSpiceFindCli(unittest.TestCase):
         err = io.StringIO()
         stdin = io.StringIO("")
 
-        code = main(["-s", "1.0"], stdin=stdin, stdout=out, stderr=err)
+        code = main(
+            ["--method", "simple", "-s", "1.0"],
+            stdin=stdin,
+            stdout=out,
+            stderr=err,
+        )
 
         self.assertEqual(code, 2)
         self.assertIn("no header row", err.getvalue())
+
+    def test_robust_on_clean_data_reports_zero(self) -> None:
+        """Clean quadratic data should produce no flags under the robust method."""
+        out = io.StringIO()
+        err = io.StringIO()
+        lines = ["y"]
+        for i in range(200):
+            x = i / 200.0
+            lines.append(f"{x * x:.6f}")
+        stdin = io.StringIO("\n".join(lines) + "\n")
+
+        code = main(
+            ["--method", "robust"],
+            stdin=stdin,
+            stdout=out,
+            stderr=err,
+        )
+
+        self.assertEqual(code, 0, msg=err.getvalue())
+        self.assertIn("No discontinuities found.", out.getvalue())
 
 
 if __name__ == "__main__":

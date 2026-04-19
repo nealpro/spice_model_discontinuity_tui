@@ -1,7 +1,5 @@
 """SPICE netlist generation utilities for FET simulations."""
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 from typing import Literal
 

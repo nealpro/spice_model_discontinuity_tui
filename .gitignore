@@ -27,3 +27,11 @@ tests/files/*
 # Notes
 
 notes/
+*.json
+
+*.md
+!README.md
+
+# Generated plots
+spice_plots/
+

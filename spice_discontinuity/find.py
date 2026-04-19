@@ -1,10 +1,10 @@
 """Discontinuity-finding utilities for SPICE simulation data."""
 
-from __future__ import annotations
-
 import csv
 from dataclasses import dataclass
 from pathlib import Path
+
+import numpy as np
 
 
 @dataclass(frozen=True)
@@ -56,10 +56,44 @@ def find_discontinuities(values: list[float], threshold: float) -> list[Disconti
     return discontinuities
 
 
-def analyze_csv_discontinuities(path: str | Path, threshold: float = 1.0) -> dict[str, list[Discontinuity]]:
+def analyze_csv_discontinuities(
+    path: str | Path, threshold: float = 1.0
+) -> dict[str, list[Discontinuity]]:
     """Analyze all numeric CSV columns for discontinuities."""
     columns = load_csv_numeric_columns(path)
     return {
         column_name: find_discontinuities(values, threshold)
         for column_name, values in columns.items()
     }
+
+
+def detect_discontinuities_higher_order(
+    vgs: np.ndarray,
+    ids: np.ndarray,
+    threshold: float | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Compute a higher-order discontinuity score from SPICE V/I data.
+
+    Returns (vgs_mid3, fda_2, final_score). The optional threshold argument is
+    accepted for API symmetry but not applied here; use
+    ``get_discontinuity_indices`` to threshold the score.
+    """
+    vgs = np.asarray(vgs, dtype=float)
+    ids = np.asarray(ids, dtype=float)
+
+    fda_1 = np.diff(ids) / np.diff(vgs)
+    vgs_mid1 = (vgs[:-1] + vgs[1:]) / 2.0
+
+    fda_2 = np.diff(fda_1) / np.diff(vgs_mid1)
+    vgs_mid2 = (vgs_mid1[:-1] + vgs_mid1[1:]) / 2.0
+
+    rpd = np.abs(np.diff(fda_2)) / (np.abs(fda_2[:-1]) + 1e-12)
+    final_score = rpd / np.diff(vgs_mid2)
+    vgs_mid3 = vgs_mid2[1:]
+
+    return vgs_mid3, fda_2, final_score
+
+
+def get_discontinuity_indices(final_score: np.ndarray, threshold: float) -> np.ndarray:
+    """Return indices of ``final_score`` that exceed ``threshold``."""
+    return np.where(final_score > threshold)[0]

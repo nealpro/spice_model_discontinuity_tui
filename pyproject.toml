@@ -1,3 +1,7 @@
+[build-system]
+requires = ["uv_build>=0.11.7,<0.12"]
+build-backend = "uv_build"
+
 [project]
 name = "spice-discontinuity"
 version = "0.1.0"
@@ -18,3 +22,7 @@ mcp = [
 
 [project.scripts]
 spice-find = "spice_cli:main"
+
+[tool.uv.build-backend]
+module-root = "."
+module-name = ["spice_cli", "spice_discontinuity"]

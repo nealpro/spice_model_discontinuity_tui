@@ -20,7 +20,7 @@ from typing import Any, Mapping
 
 import numpy as np
 
-from devices import Device
+from .devices import Device
 from spice_discontinuity.find import DetectionResult
 
 _TOL = 1e-6
@@ -50,8 +50,8 @@ class PlotConfig:
     vgs_tick_step: float | None = None
     zoom_padding: float = 0.05
     zoom_merge_within: float = 0.02
-    grouping_field: str | None = None      # semantic device field name
-    grouping_column: str | None = None     # resolved CSV column name
+    grouping_field: str | None = None
+    grouping_column: str | None = None
     group_min: float | None = None
     group_max: float | None = None
     group_step: float | None = None
@@ -67,13 +67,7 @@ def _as_float_list(values: Any) -> list[float]:
 
 
 def load_plot_config(config: Mapping[str, Any], device: Device | None) -> PlotConfig:
-    """Read ``[plots]`` + ``[plots.grouping]`` from the TOML dict.
-
-    The grouping ``field`` in TOML is a semantic device key (e.g.
-    ``source_bulk_voltage``). It is resolved to a CSV column name through
-    ``device.fields``. When no device is configured the grouping field is
-    used verbatim as the CSV column name.
-    """
+    """Read ``[plots]`` + ``[plots.grouping]`` from the TOML dict."""
     plots = dict(config.get("plots") or {})
     grouping_raw = dict(plots.pop("grouping", None) or {})
 
@@ -141,11 +135,7 @@ def load_plot_config(config: Mapping[str, Any], device: Device | None) -> PlotCo
 def filter_groups(
     group_values: list[float], config: PlotConfig
 ) -> list[float]:
-    """Apply min/max/step/skip filters from ``[plots.grouping]``.
-
-    Mirrors the user's original filter snippet: inclusive range, optional
-    step alignment relative to ``group_min``, explicit skip list.
-    """
+    """Apply min/max/step/skip filters from ``[plots.grouping]``."""
     out: list[float] = []
     step = config.group_step
     base = config.group_min if config.group_min is not None else (
@@ -276,8 +266,6 @@ def _plot_fda2(
         result = detections[value]
         if result.fda_2.size == 0:
             continue
-        # fda_2 lives on x_mid2 (length x_mid3 + 1). Reconstruct x_mid2 by
-        # extending x_mid3 one step to the left.
         if result.x.size >= 2:
             first = result.x[0] - (result.x[1] - result.x[0])
             x_mid2 = np.concatenate(([first], result.x))
@@ -294,7 +282,6 @@ def _plot_fda2(
                 (result.indices >= 0) & (result.indices < result.x.size)
             ]
             if idx.size:
-                # result.fda_2 index that aligns with x_mid3[i] is i+1.
                 fda_indices = idx + 1
                 fda_indices = fda_indices[fda_indices < result.fda_2.size]
                 ax.scatter(
@@ -314,11 +301,7 @@ def render_iv_plots(
     *,
     config: PlotConfig,
 ) -> list[Path]:
-    """Render the four focused plots and return their paths.
-
-    Zoom plots are skipped entirely when no group flagged any discontinuity.
-    Returns the list of files actually written.
-    """
+    """Render the four focused plots and return their paths."""
     plt = _lazy_plt()
     config.output_dir.mkdir(parents=True, exist_ok=True)
 

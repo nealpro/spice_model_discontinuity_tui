@@ -20,8 +20,8 @@ INDEPENDENT_KEY = "independent"
 @dataclass(frozen=True)
 class Device:
     name: str
-    independent: str  # semantic key inside `fields` used as x-axis
-    fields: dict[str, str]  # semantic_name -> CSV column name
+    independent: str
+    fields: dict[str, str]
 
     @property
     def independent_column(self) -> str:

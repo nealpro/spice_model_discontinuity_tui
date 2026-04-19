@@ -13,11 +13,8 @@ from typing import Any, Sequence, TextIO
 
 import numpy as np
 
-from devices import Device, active_device
-from spice_discontinuity.find import (
-    DetectionResult,
-    detect as find_detect,
-)
+from .devices import Device, active_device
+from spice_discontinuity.find import DetectionResult, detect as find_detect
 
 CONFIG_PATH = Path("~/.config/spice_cli/config.toml").expanduser()
 
@@ -130,7 +127,6 @@ def _resolve_method_params(
             raise ValueError("-s/--sensitivity must be greater than 0.")
         return {"threshold": float(sensitivity)}
 
-    # robust
     sigma = sensitivity if sensitivity is not None else detection_cfg.get("sigma")
     if sigma is None:
         sigma = 50.0
@@ -240,8 +236,6 @@ def _analyze_device(
             y_scale = max(abs(float(np.mean(y_arr))), 1.0)
             if y_range / y_scale > 1e-9:
                 has_variation = True
-            # y === x (to float tolerance) means this field is a redundant
-            # alias of the independent axis — skip.
             if mirrors_independent and not np.allclose(x_arr, y_arr, rtol=1e-9, atol=1e-12):
                 mirrors_independent = False
             try:
@@ -346,7 +340,7 @@ def _render_plots(
     error_stream: TextIO,
 ) -> None:
     """Render the four focused plots for each analyzed dependent field."""
-    from plot import load_plot_config, render_iv_plots
+    from .plot import load_plot_config, render_iv_plots
 
     try:
         plot_config = load_plot_config(config, device)
@@ -384,7 +378,6 @@ def _render_plots(
         if not groups_to_plot:
             continue
 
-        # One subfolder per analyzed field to avoid overwrites.
         field_config = _with_output_dir(
             plot_config, base_output / _safe_filename(f"{device.name}_{semantic}")
         )
@@ -399,8 +392,7 @@ def _render_plots(
 
 
 def _filter_group_values(values: list[float], plot_config) -> list[float]:
-    # Imported lazily to keep matplotlib off the critical path for tests.
-    from plot import filter_groups
+    from .plot import filter_groups
 
     return filter_groups(values, plot_config)
 
@@ -489,9 +481,7 @@ def main(
 
     try:
         if use_device:
-            # Load the plot config early so grouping decisions stay consistent
-            # between the analysis loop and the plotter.
-            from plot import load_plot_config
+            from .plot import load_plot_config
 
             plot_config = None
             try:

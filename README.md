@@ -20,13 +20,13 @@ uv sync
 ### Run the CLI
 
 ```bash
-uv run spice-find path/to/data.csv
+uv run spice-cli path/to/data.csv
 ```
 
 You can also read from stdin:
 
 ```bash
-cat path/to/data.csv | uv run spice-find -
+cat path/to/data.csv | uv run spice-cli -
 ```
 
 Useful flags:

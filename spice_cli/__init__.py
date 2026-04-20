@@ -36,7 +36,7 @@ def _load_config() -> dict[str, Any]:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="spice-find",
+        prog="spice-cli",
         description="Find discontinuities in CSV numeric columns.",
     )
     parser.add_argument(

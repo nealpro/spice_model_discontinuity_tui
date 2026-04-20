@@ -29,12 +29,18 @@ notes/
 *.md
 !README.md
 !docs/*.md
+docs/*.typ
+docs/*.pdf
 
 .config_saved
 
 # Generated plots
 spice_plots/
+spice_plots_backup/
+*.tar
 
 # Testing files directory
 tests/files/*
 tests/mcp/*
+
+tools/

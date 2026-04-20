@@ -21,9 +21,20 @@ __pycache__/
 !requirements.txt
 !requirements-*.txt
 
-# Testing files directory
-tests/files/*
-
 # Notes
 
 notes/
+*.json
+
+*.md
+!README.md
+!docs/*.md
+
+.config_saved
+
+# Generated plots
+spice_plots/
+
+# Testing files directory
+tests/files/*
+tests/mcp/*

@@ -26,24 +26,35 @@ j_i =
 {\max\left(\left|\bar{x}^{(2)}_{i+1} - \bar{x}^{(2)}_i\right|, \varepsilon\right)}
 $$
 
-and rescales that series with a robust estimate of spread:
+and rescales each point using a **local windowed MAD**. Rather than computing
+a single global MAD over the entire jump series, the baseline at each index
+\(i\) is estimated from a sliding window of half-width \(w\) that excludes
+point \(i\) itself (leave-one-out):
 
 $$
-\operatorname{MAD}(j) = \operatorname{median}_i \left|j_i - \operatorname{median}(j)\right|
+W_i = \{j_k : |k - i| \le w,\; k \ne i\}
 $$
 
 $$
-\hat{\sigma} = 1.4826 \cdot \operatorname{MAD}(j)
+\operatorname{MAD}_i = \operatorname{median}_{k \in W_i} \left|j_k - \operatorname{median}(W_i)\right|
+$$
+
+$$
+\hat{\sigma}_i = 1.4826 \cdot \max\!\left(\operatorname{MAD}_i,\, \varepsilon\right)
 $$
 
 The final score is
 
 $$
-s_i = \frac{|j_i|}{\hat{\sigma}}
+s_i = \frac{|j_i|}{\hat{\sigma}_i}
 $$
 
-So the detector is looking for unusually large MAD-z-scores in the curvature
-jump signal.
+Using a local baseline means a real discontinuity cannot inflate its own MAD
+and suppress its own z-score. It also prevents a long flat saturation region
+from setting a near-zero global MAD that causes false positives at the onset of
+the curve.
+
+The default half-window is \(w = 10\) samples.
 
 ## Peak filtering
 

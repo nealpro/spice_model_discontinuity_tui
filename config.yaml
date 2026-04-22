@@ -1,0 +1,6 @@
+input_path: "./real_idvd.csv"
+sensitivity: 50
+ignore_columns: 
+  - V(DRAIN)
+  - V(GATE)
+output_file: "results.txt"

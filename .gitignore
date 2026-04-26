@@ -33,6 +33,7 @@ docs/*.typ
 docs/*.pdf
 
 .config_saved
+config_examples/latest.toml
 
 # Generated plots
 spice_plots/

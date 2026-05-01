@@ -19,20 +19,55 @@ INDEPENDENT_KEY = "independent"
 
 @dataclass(frozen=True)
 class Device:
+    """Maps semantic field names to CSV column headers for a SPICE device.
+
+    Each field in *fields* uses a semantic key (e.g. ``"drain_current"``) that
+    maps to the exact CSV column header (e.g. ``"I(VDRAIN)"``). One field is
+    designated as the independent axis via *independent*.
+
+    Attributes
+    ----------
+    name:
+        Device identifier (matches the ``[devices.<NAME>]`` TOML key).
+    independent:
+        Semantic key of the x-axis field within *fields*.
+    fields:
+        ``{semantic_name: csv_column_header}`` for all declared fields.
+    """
+
     name: str
     independent: str
     fields: dict[str, str]
 
     @property
     def independent_column(self) -> str:
+        """CSV column header for the independent (x-axis) field."""
         return self.fields[self.independent]
 
     def dependent_items(self) -> list[tuple[str, str]]:
+        """Return ``[(semantic, csv_column), ...]`` for all non-independent fields."""
         return [(k, v) for k, v in self.fields.items() if k != self.independent]
 
 
 def load_devices(config: dict[str, Any]) -> dict[str, Device]:
-    """Parse every ``[devices.<name>]`` table from the config."""
+    """Parse every ``[devices.<name>]`` table from the config.
+
+    Parameters
+    ----------
+    config:
+        Parsed TOML config dict. Device tables live under the ``"devices"`` key.
+
+    Returns
+    -------
+    dict
+        ``{device_name: Device}`` for every valid table found.
+
+    Raises
+    ------
+    ValueError
+        If a table is missing the ``"independent"`` key, or if the value of
+        ``"independent"`` does not name a field in the same table.
+    """
     raw = config.get("devices") or {}
     devices: dict[str, Device] = {}
     for name, table in raw.items():
@@ -58,7 +93,26 @@ def load_devices(config: dict[str, Any]) -> dict[str, Device]:
 
 
 def active_device(config: dict[str, Any], override: str | None = None) -> Device | None:
-    """Resolve the active device: explicit override → ``[analysis].device`` → None."""
+    """Resolve the active device: explicit override → ``[analysis].device`` → None.
+
+    Parameters
+    ----------
+    config:
+        Parsed TOML config dict.
+    override:
+        Device name from the ``--device`` CLI flag. Takes priority over config.
+
+    Returns
+    -------
+    Device or None
+        The resolved device, or ``None`` if no device name is set in either
+        *override* or ``[analysis].device``.
+
+    Raises
+    ------
+    KeyError
+        If a device name is specified but not found in ``[devices]``.
+    """
     devices = load_devices(config)
     if not devices:
         return None

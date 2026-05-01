@@ -2,8 +2,10 @@
 log_level = "info"
 
 [output]
-format = "table"
-color = true
+# output_dir: base directory for results.csv and all generated files.
+# Default when unset: spice_cli_output/ under the current working directory.
+output_dir = "spice_cli_output"
+# plots_dir: legacy alias for output_dir (still recognized as a fallback).
 plots_dir = "spice_plots"
 
 [detection]

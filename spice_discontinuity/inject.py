@@ -7,7 +7,30 @@ import pandas as pd
 
 
 def inject_step(values: list[float], index: int, magnitude: float) -> list[float]:
-    """Inject a persistent step change starting at index."""
+    """Inject a persistent step change starting at index.
+
+    Adds *magnitude* to every element from *index* onward, leaving earlier
+    elements unchanged.
+
+    Parameters
+    ----------
+    values:
+        Original numeric series.
+    index:
+        First sample to shift. Must satisfy ``0 <= index < len(values)``.
+    magnitude:
+        Additive offset applied from *index* to the end.
+
+    Returns
+    -------
+    list[float]
+        New list with the step applied; *values* is not mutated.
+
+    Raises
+    ------
+    IndexError
+        If *index* is out of range.
+    """
     if not 0 <= index < len(values):
         raise IndexError("index out of range.")
     output = list(values)
@@ -17,7 +40,29 @@ def inject_step(values: list[float], index: int, magnitude: float) -> list[float
 
 
 def inject_spike(values: list[float], index: int, magnitude: float) -> list[float]:
-    """Inject a single-point spike at index."""
+    """Inject a single-point spike at index.
+
+    Adds *magnitude* only to ``values[index]``; all other elements are unchanged.
+
+    Parameters
+    ----------
+    values:
+        Original numeric series.
+    index:
+        Index of the sample to perturb. Must satisfy ``0 <= index < len(values)``.
+    magnitude:
+        Additive perturbation at the spike location.
+
+    Returns
+    -------
+    list[float]
+        New list with the spike applied; *values* is not mutated.
+
+    Raises
+    ------
+    IndexError
+        If *index* is out of range.
+    """
     if not 0 <= index < len(values):
         raise IndexError("index out of range.")
     output = list(values)
@@ -31,7 +76,33 @@ def inject_random_spikes(
     magnitude: float,
     seed: int | None = None,
 ) -> list[float]:
-    """Inject random spikes for synthetic discontinuity testing."""
+    """Inject random spikes for synthetic discontinuity testing.
+
+    Selects *count* unique positions without replacement and adds *magnitude*
+    to each selected sample.
+
+    Parameters
+    ----------
+    values:
+        Original numeric series.
+    count:
+        Number of spikes to inject. Must satisfy ``0 <= count <= len(values)``.
+    magnitude:
+        Additive perturbation at each spike location.
+    seed:
+        RNG seed for reproducible spike placement. Pass ``None`` for a
+        non-deterministic run.
+
+    Returns
+    -------
+    list[float]
+        New list with spikes applied; *values* is not mutated.
+
+    Raises
+    ------
+    ValueError
+        If ``count < 0`` or ``count > len(values)``.
+    """
     if count < 0:
         raise ValueError("count must be non-negative.")
     if count > len(values):

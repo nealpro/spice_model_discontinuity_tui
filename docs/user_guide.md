@@ -35,8 +35,8 @@ Pipe from stdin:
 cat data.csv | uv run spice-cli -
 ```
 
-The tool prints a per-column discontinuity summary to stdout. If a device is configured
-and a plot output directory is set, it also writes four JPEG plots.
+The tool prints a per-column discontinuity summary to stdout and always writes a
+`results.csv` to the output directory. Pass `-p` to also render four JPEG plots.
 
 ---
 
@@ -96,6 +96,11 @@ usage: spice-cli [options] [input]
 positional:
   input                     CSV file path, or '-' for stdin
 
+config:
+  -c, --config PATH         TOML config file (default: ~/.config/spice_cli/config.toml)
+  --help-format TOPIC       Print format docs for TOPIC and exit
+                            Topics: config, device, csv, plots
+
 detection:
   --method {simple,higher_order,robust}
   -s, --sensitivity FLOAT   Threshold (simple/higher_order) or sigma (robust)
@@ -105,6 +110,9 @@ detection:
 device:
   --device NAME             Override active device from config
 
+output:
+  -p, --plot                Render IV-curve plots (DC sweep only; also enabled by [plots] in config)
+
 injection:
   --inject                  Enable injection mode
   -o, --output PATH         Output CSV path (required with --inject)
@@ -113,6 +121,8 @@ injection:
   --magnitude MAG           Spike magnitude
   --seed INT                RNG seed for reproducibility
 ```
+
+Run `spice-cli --help-format <topic>` for detailed format documentation on any topic.
 
 ---
 
@@ -156,90 +166,32 @@ uv run spice-cli data.csv --device FET
 1. Resolves CSV columns through the device's field mappings
 2. Analyzes each dependent field vs the independent axis
 3. Groups results by the grouping column if one is configured under `[plots.grouping]`
-4. Generates 4 plots if `[plots]` is configured with an output directory
+4. Always writes `results.csv` to the output directory
+5. Generates 4 JPEG plots per field if `-p` is passed or `[plots]` is in config (DC sweep only)
 
 ---
 
 ## Configuration Reference
 
 Config file: `~/.config/spice_cli/config.toml`  
-CLI flags override all config values.  
-See `config_examples/config.toml` for a full annotated example.
+Override with: `spice-cli -c /path/to/config.toml`  
+CLI flags override all config values.
 
-### `[detection]`
+See **[docs/config_reference.md](config_reference.md)** for the full reference with all keys, types, and defaults.
 
-```toml
-[detection]
-method          = "robust"
-sensitivity     = 50.0
-min_prominence  = 20.0
-min_separation  = 3
-```
-
-### `[analysis]`
+A minimal working config:
 
 ```toml
 [analysis]
 device = "FET"
-```
 
-### `[devices.<NAME>]`
-
-```toml
 [devices.FET]
-independent         = "gate_voltage"
-gate_voltage        = "VGS"
-drain_current       = "ID"
-source_bulk_voltage = "VSB"
+independent   = "gate_voltage"
+gate_voltage  = "V(X1.GATE,X1.SOURCE)"
+drain_current = "I(VDRAIN)"
 ```
 
-### `[plots]`
-
-```toml
-[plots]
-output_dir      = "~/spice_plots"
-figsize         = [12, 5]
-dpi             = 150
-ids_ylabel      = "I_D"
-ids_unit_scale  = 1e3          # A → mA
-vgs_xlabel      = "V_GS (V)"
-vgs_xlim        = [-0.5, 1.5]
-vgs_tick_step   = 0.25
-zoom_padding    = 0.1
-zoom_merge_within = 0.05
-title_prefix    = "NMOS"
-```
-
-### `[plots.grouping]`
-
-```toml
-[plots.grouping]
-field          = "source_bulk_voltage"
-min            = -0.6
-max            = 0.0
-step           = 0.2
-skip           = [-0.4]
-label_template = "V_SB = {value:.2f} V"
-```
-
-`field` is resolved through the active device's mappings. If no device is active, it is
-treated as a raw CSV column name.
-
-### `[output]`
-
-```toml
-[output]
-plots_dir = "~/spice_plots"   # fallback if plots.output_dir is unset
-```
-
-### `[inputs]`
-
-```toml
-[inputs]
-files = ["data/nmos.csv", "data/pmos.csv"]
-```
-
-Used when no file is specified and stdin is an interactive terminal.
+See `config_examples/config.toml` for a fully annotated example.
 
 ---
 
@@ -255,12 +207,18 @@ Lowering `--sensitivity` from the default of 50 catches subtler discontinuities.
 
 ### Analyze a FET sweep with plots
 
-1. Configure device and plot settings in `~/.config/spice_cli/config.toml`.
-2. Run:
+> Plotting is only supported for DC sweep data.
+
+1. Configure device settings in `~/.config/spice_cli/config.toml`.
+2. Run with `-p` to enable plots:
    ```bash
-   uv run spice-cli data.csv --device FET
+   uv run spice-cli data.csv --device FET -p
    ```
-3. Review stdout summary and the four plots written to `plots.output_dir`.
+3. Review the stdout summary, `spice_cli_output/results.csv`, and the four JPEG
+   plots written to `spice_cli_output/plots/<device>_<field>/`.
+
+Plots are also generated automatically (without `-p`) when a `[plots]` section
+is present in config.
 
 ### Inject synthetic faults and verify detection
 
@@ -289,6 +247,7 @@ cat simulation_output.csv | uv run spice-cli - --device FET
   V:  0 discontinuities
   ID: 2 discontinuities at indices [142, 301]
   ...
+Results written to spice_cli_output/results.csv
 ```
 
 ### Stdout summary (with device)
@@ -298,16 +257,35 @@ Device: FET
 3 fields analyzed
   drain_current: 2 discontinuities
   ...
+Results written to spice_cli_output/results.csv
 ```
 
+### Results CSV (`results.csv`)
+
+Always written to the output directory. One row per detected discontinuity.
+
+| Column | Description |
+|---|---|
+| `field` | Semantic field name (device mode) or CSV column name (generic mode) |
+| `group` | Group value (e.g. bulk voltage), empty if no grouping |
+| `index` | Index in the score array where the discontinuity was flagged |
+| `x_value` | Corresponding x-axis value |
+| `score` | Detection score at this index |
+| `threshold` | Threshold applied by the detection method |
+| `method` | Detection method used (`simple`, `higher_order`, or `robust`) |
+
+If no discontinuities are found, the file contains only the header row.
+
 ### Plot files
+
+Generated with `-p` or when `[plots]` is in config. DC sweep only.
 
 | File | Description |
 |---|---|
 | `iv_full.jpg` | I_D vs V_GS, all bulk-voltage groups, with discontinuity markers |
 | `fda2_full.jpg` | d²I_D/dV_GS² vs V_GS |
 | `iv_zoom.jpg` | I_D zoomed to detected discontinuity regions |
-| `fda2_zoom.jpg` | d²I_D/dV_GS² zoomed |
+| `fda2_zoom.jpg` | d²I_D/dV_GS² zoomed (omitted if no discontinuities found) |
 
 ---
 
@@ -324,8 +302,9 @@ Device: FET
 - Confirm the data is sorted by the independent axis
 
 **Plots not generated:**
-- `[plots] output_dir` must be set in config
-- An active device must be configured via `[analysis] device`
+- Pass `-p` flag, or add a `[plots]` section to config
+- Plotting requires an active device (`[analysis].device` or `--device`)
+- Plotting is only supported for DC sweep data
 - CSV column names must exactly match the values in `[devices.<NAME>]` (case-sensitive)
 
 **Device fields not resolving:**

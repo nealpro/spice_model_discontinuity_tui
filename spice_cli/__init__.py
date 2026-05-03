@@ -416,21 +416,27 @@ def _write_results_csv(
     detections: dict[str, Any],
     output_dir: Path,
     filename: str = "results.csv",
+    group_field: str | None = None,
 ) -> Path:
     """Write detection results to a CSV file.
 
-    Handles both device-mode results ``{semantic: {group: DetectionResult}}``
-    and generic-mode results ``{column_name: DetectionResult}``.
+    Handles both device-mode results
+    ``{semantic: {group: (DetectionResult, x_arr, y_arr, row_idxs)}}``
+    and generic-mode results
+    ``{column_name: (DetectionResult, x_arr, y_arr, row_idxs)}``.
 
     Parameters
     ----------
     detections:
-        Device-mode: ``{semantic_field: {group_value: DetectionResult}}``.
-        Generic-mode: ``{column_name: DetectionResult}``.
+        Device-mode: ``{semantic_field: {group_value: (DetectionResult, ...)}}``.
+        Generic-mode: ``{column_name: (DetectionResult, ...)}``.
     output_dir:
         Directory to write the results file into (created if needed).
     filename:
         Output file name. Default ``"results.csv"``.
+    group_field:
+        Semantic name of the grouping axis (e.g. ``"source_bulk_voltage"``),
+        or ``None`` for generic mode / ungrouped device mode.
 
     Returns
     -------
@@ -442,17 +448,22 @@ def _write_results_csv(
 
     with out_path.open("w", encoding="utf-8", newline="") as fh:
         writer = csv.writer(fh)
-        writer.writerow(
-            ["field", "group", "index", "x_value", "score", "threshold", "method"]
-        )
+        if group_field:
+            writer.writerow(
+                ["field", "group_field", "group", "input_row", "x_value", "y_value", "score", "threshold", "method"]
+            )
+        else:
+            writer.writerow(
+                ["field", "input_row", "x_value", "y_value", "score", "threshold", "method"]
+            )
 
         for field_name, field_data in detections.items():
-            if isinstance(field_data, DetectionResult):
-                per_group: dict[float | None, DetectionResult] = {None: field_data}
+            if isinstance(field_data, tuple):
+                per_group: dict[float | None, tuple] = {None: field_data}
             else:
                 per_group = field_data
 
-            for group_value, result in sorted(
+            for group_value, (result, x_arr, y_arr, row_idxs) in sorted(
                 per_group.items(), key=lambda kv: (kv[0] is None, kv[0] or 0.0)
             ):
                 group_str = "" if group_value is None else f"{group_value:.6g}"
@@ -465,17 +476,35 @@ def _write_results_csv(
                         if idx < result.score.size
                         else float("nan")
                     )
-                    writer.writerow(
-                        [
-                            field_name,
-                            group_str,
-                            int(idx),
-                            f"{x_val:.6g}",
-                            f"{score_val:.6g}",
-                            f"{result.threshold:.6g}",
-                            result.method,
-                        ]
-                    )
+                    closest = int(np.argmin(np.abs(x_arr - x_val)))
+                    y_val = float(y_arr[closest])
+                    input_row_val = int(row_idxs[closest]) + 1
+                    if group_field:
+                        writer.writerow(
+                            [
+                                field_name,
+                                group_field,
+                                group_str,
+                                input_row_val,
+                                f"{x_val:.6g}",
+                                f"{y_val:.6g}",
+                                f"{score_val:.6g}",
+                                f"{result.threshold:.6g}",
+                                result.method,
+                            ]
+                        )
+                    else:
+                        writer.writerow(
+                            [
+                                field_name,
+                                input_row_val,
+                                f"{x_val:.6g}",
+                                f"{y_val:.6g}",
+                                f"{score_val:.6g}",
+                                f"{result.threshold:.6g}",
+                                result.method,
+                            ]
+                        )
 
     return out_path
 
@@ -550,11 +579,12 @@ def _group_rows(
     independent_col: str,
     dependent_col: str,
     grouping_col: str | None,
-) -> dict[float | None, tuple[np.ndarray, np.ndarray]]:
-    """Return ``{group_value_or_None: (x_sorted, y_sorted)}``.
+) -> dict[float | None, tuple[np.ndarray, np.ndarray, np.ndarray]]:
+    """Return ``{group_value_or_None: (x_sorted, y_sorted, row_idxs_sorted)}``.
 
     When ``grouping_col`` is None, the whole column is a single group keyed
-    by ``None``.
+    by ``None``. ``row_idxs`` are 0-based indices into the original CSV data
+    rows (add 1 for 1-based spreadsheet row numbers).
     """
     x_all = columns[independent_col]
     y_all = columns[dependent_col]
@@ -565,23 +595,25 @@ def _group_rows(
     else:
         g_all = None
 
-    buckets: dict[float | None, tuple[list[float], list[float]]] = defaultdict(
-        lambda: ([], [])
+    buckets: dict[float | None, tuple[list[float], list[float], list[int]]] = defaultdict(
+        lambda: ([], [], [])
     )
     for i in range(n):
         key: float | None = None
         if g_all is not None:
             key = round(float(g_all[i]), 9)
-        xs, ys = buckets[key]
+        xs, ys, idxs = buckets[key]
         xs.append(float(x_all[i]))
         ys.append(float(y_all[i]))
+        idxs.append(i)
 
-    out: dict[float | None, tuple[np.ndarray, np.ndarray]] = {}
-    for key, (xs, ys) in buckets.items():
+    out: dict[float | None, tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
+    for key, (xs, ys, idxs) in buckets.items():
         x_arr = np.asarray(xs, dtype=float)
         y_arr = np.asarray(ys, dtype=float)
+        idx_arr = np.asarray(idxs, dtype=int)
         order = np.argsort(x_arr, kind="mergesort")
-        out[key] = (x_arr[order], y_arr[order])
+        out[key] = (x_arr[order], y_arr[order], idx_arr[order])
     return out
 
 
@@ -592,7 +624,7 @@ def _analyze_device(
     method_params: dict[str, Any],
     grouping_col: str | None,
     error_stream: TextIO,
-) -> dict[str, dict[float | None, DetectionResult]]:
+) -> dict[str, dict[float | None, tuple[DetectionResult, np.ndarray, np.ndarray, np.ndarray]]]:
     """Run method-dispatched detection per dependent field and per group.
 
     Parameters
@@ -614,12 +646,12 @@ def _analyze_device(
     Returns
     -------
     dict
-        ``{semantic_field: {group_value: DetectionResult}}``.
+        ``{semantic_field: {group_value: (DetectionResult, x_arr, y_arr, row_idxs)}}``.
     """
     if device.independent_column not in columns:
         return {}
 
-    results: dict[str, dict[float | None, DetectionResult]] = {}
+    results: dict[str, dict[float | None, tuple[DetectionResult, np.ndarray, np.ndarray, np.ndarray]]] = {}
     for semantic, csv_name in device.dependent_items():
         if csv_name == grouping_col or semantic == device.independent:
             continue
@@ -636,10 +668,10 @@ def _analyze_device(
             )
             continue
 
-        per_group: dict[float | None, DetectionResult] = {}
+        per_group: dict[float | None, tuple[DetectionResult, np.ndarray, np.ndarray, np.ndarray]] = {}
         has_variation = False
         mirrors_independent = True
-        for group_value, (x_arr, y_arr) in groups.items():
+        for group_value, (x_arr, y_arr, row_idxs) in groups.items():
             if x_arr.size < 4 and method == "robust":
                 continue
             if x_arr.size < 2:
@@ -651,7 +683,7 @@ def _analyze_device(
             if mirrors_independent and not np.allclose(x_arr, y_arr, rtol=1e-9, atol=1e-12):
                 mirrors_independent = False
             try:
-                per_group[group_value] = find_detect(method, x_arr, y_arr, **method_params)
+                per_group[group_value] = (find_detect(method, x_arr, y_arr, **method_params), x_arr, y_arr, row_idxs)
             except ValueError as exc:
                 print(
                     f"warning: {device.name}.{semantic} "
@@ -690,13 +722,13 @@ def _generic_column_summary(
     Returns
     -------
     dict
-        ``{column_name: DetectionResult}``.
+        ``{column_name: (DetectionResult, x_arr, y_arr, row_idxs)}``.
     """
     x_override: np.ndarray | None = None
     if independent_col and independent_col in columns:
         x_override = np.asarray(columns[independent_col], dtype=float)
 
-    results: dict[str, DetectionResult] = {}
+    results: dict[str, tuple[DetectionResult, np.ndarray, np.ndarray, np.ndarray]] = {}
     for name, values in columns.items():
         if independent_col and name == independent_col:
             continue
@@ -707,7 +739,8 @@ def _generic_column_summary(
         if method == "robust" and y.size < 4:
             continue
         try:
-            results[name] = find_detect(method, x, y, **method_params)
+            row_idxs = np.arange(len(y), dtype=int)
+            results[name] = (find_detect(method, x, y, **method_params), x, y, row_idxs)
         except ValueError as exc:
             print(f"warning: column {name!r}: {exc}", file=error_stream)
     return results
@@ -741,10 +774,10 @@ def _write_device_summary(
         file=output,
     )
     for semantic, per_group in results.items():
-        field_total = sum(r.indices.size for r in per_group.values())
+        field_total = sum(tup[0].indices.size for tup in per_group.values())
         total += field_total
         print(f"{device.name}.{semantic}: {field_total}", file=output)
-        for group_value, result in sorted(
+        for group_value, (result, _, _, _) in sorted(
             per_group.items(), key=lambda kv: (kv[0] is None, kv[0] or 0.0)
         ):
             if result.indices.size == 0:
@@ -782,12 +815,12 @@ def _write_generic_summary(
         Total number of discontinuities found.
     """
     print(f"Analyzed {len(results)} numeric column(s).", file=output)
-    total = sum(r.indices.size for r in results.values())
+    total = sum(tup[0].indices.size for tup in results.values())
     if total == 0:
         print("No discontinuities found.", file=output)
         return 0
     print(f"Found {total} discontinuity/discontinuities.", file=output)
-    for name, result in results.items():
+    for name, (result, _, _, _) in results.items():
         print(f"{name}: {result.indices.size}", file=output)
         for idx in result.indices:
             if idx < result.x.size:
@@ -850,8 +883,8 @@ def _render_plots(
         else:
             selected = [None] if None in groups else []  # type: ignore[list-item]
 
-        groups_to_plot = {k: groups[k] for k in selected if k in groups}
-        dets_to_plot = {k: per_group[k] for k in selected if k in per_group}
+        groups_to_plot = {k: groups[k][:2] for k in selected if k in groups}
+        dets_to_plot = {k: per_group[k][0] for k in selected if k in per_group}
         if not groups_to_plot:
             continue
 
@@ -1162,7 +1195,7 @@ def main(
             )
             _write_device_summary(device, detections, output_stream)
 
-            csv_path = _write_results_csv(detections, base_output_dir)
+            csv_path = _write_results_csv(detections, base_output_dir, group_field=group_by_semantic)
             print(f"Results written to {csv_path}", file=output_stream)
 
             if plot_config is not None and detections:

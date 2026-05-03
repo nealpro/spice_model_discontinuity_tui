@@ -32,17 +32,15 @@ Format: YAML
 
 Sections recognized:
 
-  output:
+  io:
     output_dir: "spice_cli_output"   # base directory for all output files
+    files: ["data/nmos.csv"]         # fallback file(s) when stdin is a terminal
 
   detection:
     method: "robust"                 # "simple" | "higher_order" | "robust"
     sensitivity: 50.0               # threshold (simple/higher_order) or z-score sigma (robust)
     min_prominence: 20.0            # robust only: minimum peak prominence
     min_separation: 3               # robust only: minimum index gap between peaks
-
-  inputs:
-    files: ["data/nmos.csv"]         # fallback file(s) when stdin is a terminal
 
   analysis:
     device: "FET"                    # active device (must match a devices.<NAME> table)
@@ -396,8 +394,7 @@ def _safe_filename(name: str) -> str:
 def _resolve_output_dir(config: dict[str, Any]) -> Path:
     """Return the base output directory from config, or the default.
 
-    Fallback chain: ``[output].output_dir`` → ``[output].plots_dir`` →
-    ``./spice_cli_output``.
+    Reads ``[io].output_dir``; falls back to ``./spice_cli_output``.
 
     Parameters
     ----------
@@ -409,8 +406,7 @@ def _resolve_output_dir(config: dict[str, Any]) -> Path:
     Path
         Resolved output directory (not yet created).
     """
-    output_cfg = config.get("output") or {}
-    raw = output_cfg.get("output_dir") or output_cfg.get("plots_dir")
+    raw = (config.get("io") or {}).get("output_dir")
     if raw:
         return Path(raw).expanduser()
     return Path.cwd() / "spice_cli_output"
@@ -1106,7 +1102,7 @@ def main(
         else:
             is_tty = getattr(input_stream, "isatty", lambda: False)
             if is_tty():
-                configured = config.get("inputs", {}).get("files") or []
+                configured = (config.get("io") or {}).get("files") or []
                 if configured:
                     with Path(configured[0]).open(encoding="utf-8", newline="") as handle:
                         columns = _load_numeric_columns_from_stream(handle)

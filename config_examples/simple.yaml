@@ -1,10 +1,10 @@
 general:
   log_level: "info"
 
-output:
-  format: "table"
-  color: true
-  plots_dir: "spice_plots"
+io:
+  output_dir: "spice_cli_output"
+  files:
+    - "tests/files/simulation_data_sample.csv"
 
 detection:
   # method: "simple" | "higher_order" | "robust"
@@ -12,10 +12,6 @@ detection:
   #   - robust: `sensitivity` overrides the default σ multiplier on MAD (default 50.0).
   method: "simple"
   sensitivity: 1.0
-
-inputs:
-  files:
-    - "tests/files/simulation_data_sample.csv"
 
 analysis:
   device: "FET"

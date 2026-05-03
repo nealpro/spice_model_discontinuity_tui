@@ -12,21 +12,23 @@ CLI flags take priority over all config values.
 
 ---
 
-## `[output]`
+## `[io]`
 
-Base directory for all generated files (results CSV and plots).
+Input and output paths.
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `output_dir` | string | `spice_cli_output/` in cwd | Base output directory for results and plots |
-| `plots_dir` | string | — | Legacy alias; used as a fallback if `output_dir` is not set |
+| `output_dir` | string | `spice_cli_output/` in cwd | Base directory for `results.csv` and all generated files |
+| `files` | array of strings | — | CSV file(s) to use when no file argument is given and stdin is a terminal |
 
 ```yaml
-output:
+io:
   output_dir: "spice_cli_output"
+  files:
+    - "data/nmos.csv"
 ```
 
-When neither key is set, output goes to `spice_cli_output/` under the current working directory.
+When `output_dir` is not set, output goes to `spice_cli_output/` under the current working directory.
 
 ---
 
@@ -53,22 +55,6 @@ detection:
 - **`sensitivity`**: For `simple`/`higher_order`, a raw score threshold (must be > 0). For `robust`, the MAD-z-score threshold (sigma multiplier).
 - **`min_prominence`**: Robust only. Minimum height a peak must rise above the surrounding valleys to be flagged. Prevents clustered false positives.
 - **`min_separation`**: Robust only. Minimum index distance between two flagged peaks.
-
----
-
-## `[inputs]`
-
-Fallback input files used when no file argument is given and stdin is an interactive terminal.
-
-| Key | Type | Description |
-|---|---|---|
-| `files` | array of strings | CSV file paths; the first entry is used |
-
-```yaml
-inputs:
-  files:
-    - "data/nmos.csv"
-```
 
 ---
 
@@ -126,7 +112,7 @@ In this example, `gate_voltage` is the x-axis; `drain_current` and `source_bulk_
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `output_dir` | string | `<output_dir>/plots/` | Directory for JPEG plot files |
+| `output_dir` | string | `<io.output_dir>/plots/` | Directory for JPEG plot files |
 | `figsize` | [float, float] | `[16.0, 9.0]` | Figure dimensions in inches |
 | `dpi` | int | `200` | Plot resolution |
 | `ids_ylabel` | string | `"$I_D$"` | Y-axis label (supports LaTeX) |

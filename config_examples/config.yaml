@@ -1,12 +1,12 @@
 general:
   log_level: "info"
 
-output:
+io:
   # output_dir: base directory for results.csv and all generated files.
   # Default when unset: spice_cli_output/ under the current working directory.
   output_dir: "spice_cli_output"
-  # plots_dir: legacy alias for output_dir (still recognized as a fallback).
-  plots_dir: "spice_plots"
+  files:
+    - "tests/files/simulation_data_sample.csv"
 
 detection:
   # method: "simple" | "higher_order" | "robust"
@@ -16,10 +16,6 @@ detection:
   sensitivity: 5.0
   min_prominence: 20.0
   min_separation: 3
-
-inputs:
-  files:
-    - "tests/files/simulation_data_sample.csv"
 
 analysis:
   device: "FET"

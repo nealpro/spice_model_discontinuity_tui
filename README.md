@@ -157,7 +157,7 @@ devices:
 
 | Key | Meaning |
 | --- | --- |
-| `output_dir` | Directory for generated plots (`output.plots_dir` also works) |
+| `output_dir` | Directory for generated plots (`io.output_dir` also works) |
 | `figsize` | Figure size pair |
 | `dpi` | Image resolution |
 | `ids_ylabel` | Y-axis label for current plots |
@@ -183,16 +183,11 @@ devices:
 If a device is active, `field` is resolved through that device's mappings. If
 no device is active, `field` is treated as a raw CSV column name.
 
-### `output`
+### `io`
 
 | Key | Meaning |
 | --- | --- |
-| `plots_dir` | Fallback plot output directory when `plots.output_dir` is unset |
-
-### `inputs`
-
-| Key | Meaning |
-| --- | --- |
+| `output_dir` | Base directory for `results.csv` and all generated files |
 | `files` | Ordered list of CSV files to use when stdin is interactive |
 
 ## License

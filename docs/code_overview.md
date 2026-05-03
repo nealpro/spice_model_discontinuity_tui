@@ -119,13 +119,12 @@ User config: `~/.config/spice_cli/config.yaml`. Override with `-c`. CLI flags ov
 
 | Section | Purpose |
 |---|---|
-| `output` | Base output directory (`output_dir`) for results and plots |
+| `io` | Output directory and fallback input files |
 | `detection` | Default method, sensitivity, prominence, separation |
 | `analysis` | Active device name |
 | `devices.<NAME>` | Semantic name → CSV column mappings |
 | `plots` | Figure dimensions, labels, zoom params (presence enables plotting) |
 | `plots.grouping` | Family-of-curves group filtering |
-| `inputs` | Fallback CSV files for interactive terminal |
 
 See [config_reference.md](config_reference.md) for the full reference.
 

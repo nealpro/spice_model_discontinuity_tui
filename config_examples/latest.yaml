@@ -1,5 +1,8 @@
-output:
-  plots_dir: "spice_plots"
+io:
+  output_dir: "spice_cli_output"
+  files:
+    # - "tests/files/simulation_data_sample.csv"
+    - "tests/files/fault_injected_sample.csv"
 
 detection:
   # method: "simple" | "higher_order" | "robust"
@@ -9,11 +12,6 @@ detection:
   sensitivity: 5.0
   min_prominence: 20.0
   min_separation: 3
-
-inputs:
-  files:
-    # - "tests/files/simulation_data_sample.csv"
-    - "tests/files/fault_injected_sample.csv"
 
 analysis:
   device: "FET"

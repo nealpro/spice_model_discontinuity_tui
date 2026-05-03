@@ -93,7 +93,7 @@ def load_plot_config(
         Pass ``None`` if no device is active.
     fallback_output_dir:
         Base directory to use when neither ``plots.output_dir`` nor
-        ``output.output_dir``/``output.plots_dir`` is set.
+        ``io.output_dir`` is set.
         Plots land in ``<fallback_output_dir>/plots/``.
 
     Returns
@@ -112,8 +112,7 @@ def load_plot_config(
 
     output_dir_raw = (
         plots.get("output_dir")
-        or config.get("output", {}).get("output_dir")
-        or config.get("output", {}).get("plots_dir")
+        or (config.get("io") or {}).get("output_dir")
     )
     if output_dir_raw is None:
         if fallback_output_dir is not None:
@@ -121,7 +120,7 @@ def load_plot_config(
         else:
             raise ValueError(
                 "plot output directory not set; define [plots].output_dir or "
-                "[output].output_dir in config."
+                "[io].output_dir in config."
             )
     else:
         output_dir = Path(output_dir_raw).expanduser()

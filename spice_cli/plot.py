@@ -308,8 +308,20 @@ def _plot_ids(
             ]
             if idx.size == 0:
                 continue
-            flagged_x = result.x[idx]
-            flagged_y = np.interp(flagged_x, vgs, ids) * config.ids_unit_scale
+            i_snap = np.searchsorted(vgs, result.x[idx])
+            i_snap = np.clip(i_snap, 0, len(vgs) - 1)
+            i_a = i_snap
+            i_b = np.maximum(i_snap - 1, 0)
+            N = len(vgs)
+            lo_a = np.clip(i_a - 1, 0, N - 1)
+            hi_a = np.clip(i_a + 1, 0, N - 1)
+            dev_a = np.abs(ids[i_a] - (ids[lo_a] + ids[hi_a]) / 2.0)
+            lo_b = np.clip(i_b - 1, 0, N - 1)
+            hi_b = np.clip(i_b + 1, 0, N - 1)
+            dev_b = np.abs(ids[i_b] - (ids[lo_b] + ids[hi_b]) / 2.0)
+            best = np.where(dev_a >= dev_b, i_a, i_b)
+            flagged_x = vgs[best]
+            flagged_y = ids[best] * config.ids_unit_scale
             ax.scatter(
                 flagged_x, flagged_y, color="red", s=28, zorder=5, label=None,
             )

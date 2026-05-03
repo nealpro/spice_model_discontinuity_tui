@@ -17,16 +17,20 @@ Requires Python 3.11+.
 uv sync
 ```
 
+```bash
+uv tool install .
+```
+
 ### Run the CLI
 
 ```bash
-uv run spice-cli path/to/data.csv
+spice-cli path/to/data.csv
 ```
 
 You can also read from stdin:
 
 ```bash
-cat path/to/data.csv | uv run spice-cli -
+cat path/to/data.csv | spice-cli -
 ```
 
 Useful flags:

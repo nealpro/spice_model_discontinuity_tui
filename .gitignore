@@ -38,7 +38,9 @@ config_examples/latest.toml
 # Generated plots
 spice_plots/
 spice_plots_backup/
+spice_cli_output/
 *.tar
+*.jpg
 
 # Testing files directory
 tests/files/*

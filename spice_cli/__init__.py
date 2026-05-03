@@ -81,10 +81,10 @@ A device maps semantic field names to CSV column headers.
 Defined under devices.<NAME> in config.yaml.
 
 Required key:
-  independent = "<field_name>"   points to the x-axis field in this table
+  independent: "<field_name>"   points to the x-axis field in this table
 
 All other string-valued keys are dependent fields:
-  <semantic_name> = "<CSV column header>"
+  <semantic_name>: "<CSV column header>"
 
 Column name matching is case-sensitive and must be exact, including spaces
 and parentheses (e.g. LTspice exports columns like "V(X1.GATE,X1.SOURCE)").
@@ -115,8 +115,8 @@ Rules:
   - First row must be the header (column names).
   - All other rows are data. Rows with non-parseable values in a column
     are skipped for that column; other columns are unaffected.
-  - A column is treated as numeric if at least 90% of non-empty cells
-    parse as float.
+  - A column is treated as numeric if at least one non-empty cell
+    parses as float.
   - Column names may contain any characters, including spaces, parentheses,
     and special symbols (LTspice-style names are fully supported).
 
@@ -213,9 +213,9 @@ def _build_parser() -> argparse.ArgumentParser:
         description=(
             "Find discontinuities in numeric columns of a SPICE CSV output file.\n\n"
             "INPUT FORMAT:\n"
-            "  A standard CSV with a header row. All columns where 90%+ of cells\n"
-            "  parse as float are analyzed. Column names are matched exactly,\n"
-            "  including spaces and parentheses (LTspice-style names are supported).\n\n"
+            "  A standard CSV with a header row. Columns with float-parsable values\n"
+            "  are analyzed. Column names are matched exactly, including spaces and\n"
+            "  parentheses (LTspice-style names are supported).\n\n"
             "DETECTION METHODS:\n"
             "  simple        Flag |y_i - y_{i-1}| >= T  (requires -s)\n"
             "  higher_order  Flag derivative-ratio score >= T  (requires -s)\n"

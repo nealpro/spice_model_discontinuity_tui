@@ -9,7 +9,7 @@ output:
 detection:
   # method: "simple" | "higher_order" | "robust"
   #   - simple / higher_order: `sensitivity` is a raw score threshold (> 0).
-  #   - robust: `sensitivity` overrides the default σ multiplier on MAD (default 8).
+  #   - robust: `sensitivity` overrides the default σ multiplier on MAD (default 50.0).
   method: "simple"
   sensitivity: 1.0
 

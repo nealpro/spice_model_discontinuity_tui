@@ -63,20 +63,22 @@ Reserved for future synthetic SPICE data generation.
 
 ## Package: `spice_cli`
 
-Depends on `spice_discontinuity`. Handles argument parsing, TOML config, device semantics,
+Depends on `spice_discontinuity`. Handles argument parsing, YAML config, device semantics,
 and matplotlib plotting.
 
 ### `__init__.py` — Entry point
 
 `main(argv, stdin, stdout, stderr)` runs the full user workflow:
 
-1. Load `~/.config/spice_cli/config.toml`
-2. Parse CLI arguments (override config)
-3. Load CSV (file path or stdin)
-4. Resolve active device (if configured)
-5. Dispatch to **detection** or **injection** mode
-6. Render plots (if plot config valid)
-7. Print results summary; return exit code
+1. Handle `--help-format` and exit early if requested
+2. Load config from `-c PATH` or `~/.config/spice_cli/config.yaml`
+3. Parse CLI arguments (override config)
+4. Load CSV (file path or stdin)
+5. Resolve active device (if configured)
+6. Dispatch to **detection** or **injection** mode
+7. Write `results.csv` to the output directory
+8. Render plots when `-p` is given or `plots` is in config (DC sweep only)
+9. Print results summary; return exit code
 
 **Detection mode** (default):
 - With device → semantic field mapping, per-field grouped analysis, optional 4 plots
@@ -92,7 +94,7 @@ Enables semantic references such as `drain_current` instead of raw CSV column na
 | Component | Description |
 |---|---|
 | `Device` | dataclass: `name`, `independent`, `fields` |
-| `load_devices(config)` | Parse all `[devices.<NAME>]` TOML tables |
+| `load_devices(config)` | Parse all `devices.<NAME>` YAML tables |
 | `active_device(config, override)` | Resolve active device (CLI > config > None) |
 
 ### `plot.py` — IV curve plotting
@@ -107,23 +109,25 @@ Generates four JPEG plots per run when a device and output directory are configu
 | `fda2_zoom.jpg` | d²I_D/dV_GS² zoomed |
 
 `PlotConfig` stores all matplotlib customization. `load_plot_config(config, device)` parses
-the `[plots]` and `[plots.grouping]` TOML sections.
+the `plots` and `plots.grouping` YAML sections.
 
 ---
 
 ## Configuration
 
-User config: `~/.config/spice_cli/config.toml`. CLI flags override all config values.
+User config: `~/.config/spice_cli/config.yaml`. Override with `-c`. CLI flags override all config values.
 
 | Section | Purpose |
 |---|---|
-| `[detection]` | Default method, sensitivity, prominence, separation |
-| `[analysis]` | Active device name |
-| `[devices.<NAME>]` | Semantic name → CSV column mappings |
-| `[plots]` | Figure dimensions, labels, zoom params |
-| `[plots.grouping]` | Family-of-curves group filtering |
-| `[output]` | Default plot output directory |
-| `[inputs]` | Fallback CSV files for interactive terminal |
+| `output` | Base output directory (`output_dir`) for results and plots |
+| `detection` | Default method, sensitivity, prominence, separation |
+| `analysis` | Active device name |
+| `devices.<NAME>` | Semantic name → CSV column mappings |
+| `plots` | Figure dimensions, labels, zoom params (presence enables plotting) |
+| `plots.grouping` | Family-of-curves group filtering |
+| `inputs` | Fallback CSV files for interactive terminal |
+
+See [config_reference.md](config_reference.md) for the full reference.
 
 ---
 
@@ -147,9 +151,9 @@ spice_model_discontinuity/
 │   ├── SIMPLE.md                Simple detector math
 │   ├── HIGHER_ORDER.md          Higher-order derivative detector math
 │   └── ROBUST.md                Robust MAD-based detector math
-├── config_examples/             Example TOML configurations
-│   ├── config.toml              Full example (robust method)
-│   └── simple.toml              Simple method example
+├── config_examples/             Example YAML configurations
+│   ├── config.yaml              Full example (robust method)
+│   └── simple.yaml              Simple method example
 └── tests/
     ├── test_cli.py              Integration tests (4 cases)
     └── files/                   Test data
@@ -160,18 +164,18 @@ spice_model_discontinuity/
 ## Data Flow
 
 ```
-CSV (file or stdin) + CLI flags + ~/.config/spice_cli/config.toml
+CSV (file or stdin) + CLI flags + config.yaml (-c or default)
                          │
                   spice_cli.main()
           ┌──────────────┼──────────────┐
     inject.py       devices.py        plot.py
-    (--inject)       (fields)      (rendering)
+    (--inject)       (fields)     (-p or [plots])
           │               │              │
     faulted CSV      find.detect()    4 JPEGs
                     ┌────┼────┐
                  simple h.o. robust★
                          │
                   DetectionResult
-                         │
-                   stdout summary
+                    ┌────┴────┐
+              stdout summary  results.csv
 ```

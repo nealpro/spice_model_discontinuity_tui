@@ -7,8 +7,8 @@ Produces exactly four views:
     fda2_full.jpg   — d²Ids/dVgs² vs Vgs, same groups
     fda2_zoom.jpg   — d²Ids/dVgs², same x-window as iv_zoom
 
-Group filtering (family-of-curves) is driven by ``[plots.grouping]`` in the
-user TOML config, mirroring the VBULK filter knobs the user has been using
+Group filtering (family-of-curves) is driven by ``plots.grouping`` in the
+user YAML config, mirroring the VBULK filter knobs the user has been using
 manually. The zoom pair is skipped when no group flags any discontinuity.
 """
 
@@ -38,7 +38,17 @@ def _lazy_plt():
 
 @dataclass(frozen=True)
 class PlotConfig:
-    """All plot knobs. Populate via ``load_plot_config``."""
+    """All plot knobs for IV-curve rendering.
+
+    Populate via ``load_plot_config``. Two subsystems share this config:
+
+    - **Axis formatting**: ``figsize``, ``dpi``, ``ids_ylabel``, ``ids_unit_scale``,
+      ``vgs_xlabel``, ``vgs_xlim``, ``vgs_tick_step``, ``zoom_padding``,
+      ``zoom_merge_within``, ``title_prefix``.
+    - **Family-of-curves grouping**: ``grouping_field``, ``grouping_column``,
+      ``group_min``, ``group_max``, ``group_step``, ``group_skip``,
+      ``label_template``. Filters which group values to plot and how to label them.
+    """
 
     output_dir: Path
     figsize: tuple[float, float] = (16.0, 9.0)
@@ -66,19 +76,55 @@ def _as_float_list(values: Any) -> list[float]:
     return [float(v) for v in values]
 
 
-def load_plot_config(config: Mapping[str, Any], device: Device | None) -> PlotConfig:
-    """Read ``[plots]`` + ``[plots.grouping]`` from the TOML dict."""
+def load_plot_config(
+    config: Mapping[str, Any],
+    device: Device | None,
+    *,
+    fallback_output_dir: Path | None = None,
+) -> PlotConfig:
+    """Read ``plots`` + ``plots.grouping`` from the YAML config dict.
+
+    Parameters
+    ----------
+    config:
+        Parsed YAML config dict.
+    device:
+        Active device, used to resolve semantic field names in ``plots.grouping``.
+        Pass ``None`` if no device is active.
+    fallback_output_dir:
+        Base directory to use when neither ``plots.output_dir`` nor
+        ``output.output_dir``/``output.plots_dir`` is set.
+        Plots land in ``<fallback_output_dir>/plots/``.
+
+    Returns
+    -------
+    PlotConfig
+        Populated plot configuration.
+
+    Raises
+    ------
+    ValueError
+        If no output directory can be resolved and *fallback_output_dir* is None.
+        Also raised if ``figsize`` or ``vgs_xlim`` are not two-element sequences.
+    """
     plots = dict(config.get("plots") or {})
     grouping_raw = dict(plots.pop("grouping", None) or {})
 
-    output_dir_raw = plots.get("output_dir") or config.get("output", {}).get(
-        "plots_dir"
+    output_dir_raw = (
+        plots.get("output_dir")
+        or config.get("output", {}).get("output_dir")
+        or config.get("output", {}).get("plots_dir")
     )
     if output_dir_raw is None:
-        raise ValueError(
-            "plot output directory not set; define [plots].output_dir or "
-            "[output].plots_dir in config."
-        )
+        if fallback_output_dir is not None:
+            output_dir = fallback_output_dir / "plots"
+        else:
+            raise ValueError(
+                "plot output directory not set; define [plots].output_dir or "
+                "[output].output_dir in config."
+            )
+    else:
+        output_dir = Path(output_dir_raw).expanduser()
 
     figsize = plots.get("figsize")
     figsize_tuple = tuple(_as_float_list(figsize)) if figsize else (16.0, 9.0)
@@ -99,7 +145,7 @@ def load_plot_config(config: Mapping[str, Any], device: Device | None) -> PlotCo
             csv_column = semantic_field
 
     return PlotConfig(
-        output_dir=Path(output_dir_raw),
+        output_dir=output_dir,
         figsize=figsize_tuple,  # type: ignore[arg-type]
         dpi=int(plots.get("dpi", 200)),
         ids_ylabel=str(plots.get("ids_ylabel", r"$I_D$")),
@@ -135,7 +181,22 @@ def load_plot_config(config: Mapping[str, Any], device: Device | None) -> PlotCo
 def filter_groups(
     group_values: list[float], config: PlotConfig
 ) -> list[float]:
-    """Apply min/max/step/skip filters from ``[plots.grouping]``."""
+    """Apply min/max/step/skip filters from ``[plots.grouping]``.
+
+    Filter chain order: min → max → skip → step.
+
+    Parameters
+    ----------
+    group_values:
+        All group values found in the data.
+    config:
+        Plot config carrying the filter parameters.
+
+    Returns
+    -------
+    list[float]
+        Sorted subset of *group_values* that pass all active filters.
+    """
     out: list[float] = []
     step = config.group_step
     base = config.group_min if config.group_min is not None else (
@@ -208,12 +269,14 @@ def _apply_common_axes(ax, config: PlotConfig, xlim: tuple[float, float] | None)
             )
 
 
-def _label_for(value: float, config: PlotConfig) -> str:
+def _label_for(value: float | None, config: PlotConfig) -> str:
+    if value is None:
+        return ""
     try:
         return config.label_template.format(
             value=value, field=config.grouping_field or "group"
         )
-    except (KeyError, IndexError):
+    except (KeyError, IndexError, TypeError):
         return f"{config.grouping_field or 'group'} = {value:.3g}"
 
 
@@ -245,8 +308,20 @@ def _plot_ids(
             ]
             if idx.size == 0:
                 continue
-            flagged_x = result.x[idx]
-            flagged_y = np.interp(flagged_x, vgs, ids) * config.ids_unit_scale
+            i_snap = np.searchsorted(vgs, result.x[idx])
+            i_snap = np.clip(i_snap, 0, len(vgs) - 1)
+            i_a = i_snap
+            i_b = np.maximum(i_snap - 1, 0)
+            N = len(vgs)
+            lo_a = np.clip(i_a - 1, 0, N - 1)
+            hi_a = np.clip(i_a + 1, 0, N - 1)
+            dev_a = np.abs(ids[i_a] - (ids[lo_a] + ids[hi_a]) / 2.0)
+            lo_b = np.clip(i_b - 1, 0, N - 1)
+            hi_b = np.clip(i_b + 1, 0, N - 1)
+            dev_b = np.abs(ids[i_b] - (ids[lo_b] + ids[hi_b]) / 2.0)
+            best = np.where(dev_a >= dev_b, i_a, i_b)
+            flagged_x = vgs[best]
+            flagged_y = ids[best] * config.ids_unit_scale
             ax.scatter(
                 flagged_x, flagged_y, color="red", s=28, zorder=5, label=None,
             )
@@ -301,7 +376,27 @@ def render_iv_plots(
     *,
     config: PlotConfig,
 ) -> list[Path]:
-    """Render the four focused plots and return their paths."""
+    """Render the four focused IV-curve plots and return their paths.
+
+    Only valid for DC sweep data (one independent axis, one or more grouped
+    dependent axes).
+
+    Parameters
+    ----------
+    groups:
+        ``{group_value: (x_array, y_array)}`` — sorted arrays per group.
+    detections:
+        ``{group_value: DetectionResult}`` — detection output per group.
+    config:
+        Plot configuration including output directory and axis formatting.
+
+    Returns
+    -------
+    list[Path]
+        Paths of written JPEG files (up to four: full and zoom pairs for
+        IV and second-derivative plots). Zoom plots are omitted when no
+        discontinuities are detected.
+    """
     plt = _lazy_plt()
     config.output_dir.mkdir(parents=True, exist_ok=True)
 

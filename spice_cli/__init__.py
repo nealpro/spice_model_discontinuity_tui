@@ -6,7 +6,7 @@ import argparse
 import csv
 import re
 import sys
-import tomllib
+import yaml
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Sequence, TextIO
@@ -17,36 +17,251 @@ from .devices import Device, active_device
 from spice_discontinuity.find import DetectionResult, detect as find_detect
 from spice_discontinuity.inject import inject_random_spikes
 
-CONFIG_PATH = Path("~/.config/spice_cli/config.toml").expanduser()
+_DEFAULT_CONFIG_PATH = Path("~/.config/spice_cli/config.yaml").expanduser()
 
 VALID_METHODS = ("simple", "higher_order", "robust")
 DEFAULT_METHOD = "robust"
 
+_HELP_FORMAT_TOPICS: dict[str, str] = {
+    "config": """\
+CONFIG FILE FORMAT
+==================
+Default path: ~/.config/spice_cli/config.yaml
+Override with: spice-cli -c /path/to/config.yaml
+Format: YAML
 
-def _load_config() -> dict[str, Any]:
-    """Load TOML config from the user config path, or return empty dict."""
+Sections recognized:
+
+  output:
+    output_dir: "spice_cli_output"   # base directory for all output files
+
+  detection:
+    method: "robust"                 # "simple" | "higher_order" | "robust"
+    sensitivity: 50.0               # threshold (simple/higher_order) or z-score sigma (robust)
+    min_prominence: 20.0            # robust only: minimum peak prominence
+    min_separation: 3               # robust only: minimum index gap between peaks
+
+  inputs:
+    files: ["data/nmos.csv"]         # fallback file(s) when stdin is a terminal
+
+  analysis:
+    device: "FET"                    # active device (must match a devices.<NAME> table)
+
+  devices:
+    FET:
+      independent: "gate_voltage"
+      gate_voltage: "V(X1.GATE,X1.SOURCE)"
+      drain_current: "I(VDRAIN)"
+      source_bulk_voltage: "V(X1.SOURCE,X1.BULK)"
+
+  plots:                             # presence of this section enables plotting
+    output_dir: "spice_plots"
+    figsize: [16, 9]
+    dpi: 200
+    ids_ylabel: "$I_D$"
+    ids_unit_scale: 1.0
+    vgs_xlabel: "$V_{GS}$ (V)"
+    vgs_xlim: [0.0, 1.8]
+    vgs_tick_step: 0.2
+    title_prefix: "NFET"
+    grouping:
+      field: "source_bulk_voltage"
+      min: 0.0
+      max: 1.5
+      step: 0.1
+      skip: []
+      label_template: "$V_{{SB}} = {value:.2f}$ V"
+
+See config_examples/config.yaml for a fully annotated example.\
+""",
+    "device": """\
+DEVICE FORMAT
+=============
+A device maps semantic field names to CSV column headers.
+Defined under devices.<NAME> in config.yaml.
+
+Required key:
+  independent: "<field_name>"   points to the x-axis field in this table
+
+All other string-valued keys are dependent fields:
+  <semantic_name>: "<CSV column header>"
+
+Column name matching is case-sensitive and must be exact, including spaces
+and parentheses (e.g. LTspice exports columns like "V(X1.GATE,X1.SOURCE)").
+
+Example:
+  devices:
+    NFET:
+      independent: "gate_voltage"
+      gate_voltage: "V(X1.GATE,X1.SOURCE)"
+      drain_current: "I(VDRAIN)"
+      source_bulk_voltage: "V(X1.SOURCE,X1.BULK)"
+
+Activate in config:
+  analysis:
+    device: "NFET"
+
+Or per-run with the --device flag:
+  spice-cli data.csv --device NFET
+
+Adding a new device type requires only a YAML change — no code change.\
+""",
+    "csv": """\
+CSV INPUT FORMAT
+================
+A standard comma-separated file with a header row.
+
+Rules:
+  - First row must be the header (column names).
+  - All other rows are data. Rows with non-parseable values in a column
+    are skipped for that column; other columns are unaffected.
+  - A column is treated as numeric if at least one non-empty cell
+    parses as float.
+  - Column names may contain any characters, including spaces, parentheses,
+    and special symbols (LTspice-style names are fully supported).
+
+Minimal example:
+  V(GATE),I(VDRAIN),V(SB)
+  0.0,1.23e-9,0.0
+  0.1,5.67e-9,0.0
+  0.2,2.10e-8,0.5
+
+Reading from a file:
+  spice-cli data.csv
+
+Reading from stdin:
+  cat data.csv | spice-cli -
+  spice-cli -          (then paste and press Ctrl-D)\
+""",
+    "plots": """\
+PLOTS FORMAT
+============
+Plotting is ONLY supported for DC sweep data.
+
+Plots are generated when either:
+  - The -p/--plot flag is passed, OR
+  - The plots section is present in the config file.
+
+When -p is used without a plots config section, default formatting is applied.
+
+Output files (four per analyzed field):
+  iv_full.jpg     I_D vs V_GS (full sweep)
+  iv_zoom.jpg     I_D vs V_GS (zoomed to discontinuity regions)
+  fda2_full.jpg   d2I_D/dV_GS2 (full sweep)
+  fda2_zoom.jpg   d2I_D/dV_GS2 (zoomed)
+
+plots keys and types:
+  output_dir        string          Output directory. Default: <output_dir>/plots/
+  figsize           [float, float]  Figure size in inches. Default: [16.0, 9.0]
+  dpi               int             Resolution. Default: 200
+  ids_ylabel        string          Y-axis label. Default: "$I_D$"
+  ids_unit_scale    float           Scale factor on current values. Default: 1.0
+  vgs_xlabel        string          X-axis label. Default: "$V_{GS}$ (V)"
+  vgs_xlim          [float, float]  X-axis limits. Default: auto
+  vgs_tick_step     float           X-axis tick spacing. Default: auto
+  zoom_padding      float           Fractional padding around zoom windows. Default: 0.05
+  zoom_merge_within float           Merge zoom windows within this x-distance. Default: 0.02
+  title_prefix      string          Prefix for all plot titles. Default: ""
+
+plots.grouping keys (family-of-curves):
+  field           string  Semantic field from devices.<NAME> used to group curves.
+  min             float   Exclude groups below this value.
+  max             float   Exclude groups above this value.
+  step            float   Only include groups at multiples of this interval from min.
+  skip            array   Specific group values to exclude.
+  label_template  string  Python format: {field} and {value:.Ng} placeholders available.
+                          Use {{ }} to escape literal braces in LaTeX strings.\
+""",
+}
+
+
+def _load_config(path: Path | None = None) -> dict[str, Any]:
+    """Load YAML config from *path*, or the default user config path if None.
+
+    Parameters
+    ----------
+    path:
+        Explicit config file path. If None, defaults to
+        ``~/.config/spice_cli/config.yaml``.
+
+    Returns
+    -------
+    dict
+        Parsed YAML content, or ``{}`` if the default path does not exist.
+
+    Raises
+    ------
+    FileNotFoundError
+        If *path* was explicitly given but does not exist.
+    """
+    target = path if path is not None else _DEFAULT_CONFIG_PATH
     try:
-        with CONFIG_PATH.open("rb") as handle:
-            return tomllib.load(handle)
+        with target.open("r", encoding="utf-8") as handle:
+            return yaml.safe_load(handle) or {}
     except FileNotFoundError:
+        if path is not None:
+            raise
         return {}
-    except (OSError, tomllib.TOMLDecodeError):
+    except (OSError, yaml.YAMLError):
         return {}
 
 
 def _build_parser() -> argparse.ArgumentParser:
+    """Build the argument parser for spice-cli."""
     parser = argparse.ArgumentParser(
         prog="spice-cli",
-        description="Find discontinuities in CSV numeric columns.",
+        description=(
+            "Find discontinuities in numeric columns of a SPICE CSV output file.\n\n"
+            "INPUT FORMAT:\n"
+            "  A standard CSV with a header row. Columns with float-parsable values\n"
+            "  are analyzed. Column names are matched exactly, including spaces and\n"
+            "  parentheses (LTspice-style names are supported).\n\n"
+            "DETECTION METHODS:\n"
+            "  simple        Flag |y_i - y_{i-1}| >= T  (requires -s)\n"
+            "  higher_order  Flag derivative-ratio score >= T  (requires -s)\n"
+            "  robust        MAD-normalized curvature-jump, peak-filtered  (default)\n"
+        ),
+        epilog=(
+            "EXAMPLES:\n"
+            "  spice-cli data.csv\n"
+            "  spice-cli data.csv --method simple -s 1e-4\n"
+            "  spice-cli data.csv --method robust -s 30 --min-prominence 10\n"
+            "  spice-cli data.csv -p\n"
+            "  spice-cli data.csv --device FET -p\n"
+            "  spice-cli data.csv -c ~/myproject/config.yaml\n"
+            "  cat data.csv | spice-cli -\n"
+            "  spice-cli data.csv --inject -o faulted.csv --count 5 --seed 42\n\n"
+            "Use --help-format <topic> for detailed format documentation.\n"
+            "Topics: config, device, csv, plots\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "-c",
+        "--config",
+        default=None,
+        metavar="PATH",
+        help="Path to YAML config file (default: ~/.config/spice_cli/config.yaml).",
+    )
+    parser.add_argument(
+        "--help-format",
+        metavar="TOPIC",
+        choices=list(_HELP_FORMAT_TOPICS),
+        help=(
+            "Show detailed format documentation for TOPIC and exit. "
+            "Topics: " + ", ".join(_HELP_FORMAT_TOPICS) + "."
+        ),
     )
     parser.add_argument(
         "-s",
         "--sensitivity",
         type=float,
         default=None,
-        help="For simple/higher_order: raw score threshold (> 0). "
-        "For robust: σ multiplier on MAD (default 8). "
-        "Falls back to [detection].sensitivity in ~/.config/spice_cli/config.toml.",
+        help=(
+            "For simple/higher_order: raw score threshold (> 0). "
+            "For robust: sigma multiplier on MAD (default 50). "
+            "Falls back to [detection].sensitivity in config."
+        ),
     )
     parser.add_argument(
         "--method",
@@ -58,15 +273,19 @@ def _build_parser() -> argparse.ArgumentParser:
         "--min-prominence",
         type=float,
         default=None,
-        help="Robust method only: minimum z-score prominence for a flagged peak "
-        "(default 20.0; also from [detection].min_prominence).",
+        help=(
+            "Robust method only: minimum z-score prominence for a flagged peak "
+            "(default 20.0; also from [detection].min_prominence)."
+        ),
     )
     parser.add_argument(
         "--min-separation",
         type=int,
         default=None,
-        help="Robust method only: minimum index gap between flagged peaks "
-        "(default 3; also from [detection].min_separation).",
+        help=(
+            "Robust method only: minimum index gap between flagged peaks "
+            "(default 3; also from [detection].min_separation)."
+        ),
     )
     parser.add_argument(
         "--device",
@@ -74,10 +293,21 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Override the active device name (otherwise uses [analysis].device from config).",
     )
     parser.add_argument(
+        "-p",
+        "--plot",
+        action="store_true",
+        help=(
+            "Render IV-curve plots. Only valid for DC sweep data with an active device. "
+            "Uses [plots] config if present; otherwise uses default formatting."
+        ),
+    )
+    parser.add_argument(
         "--inject",
         action="store_true",
-        help="Inject mode: write a new CSV with random spikes added to a "
-        "numeric column. Bypasses config and detection entirely. Requires -o.",
+        help=(
+            "Inject mode: write a new CSV with random spikes added to a "
+            "numeric column. Bypasses config and detection entirely. Requires -o."
+        ),
     )
     parser.add_argument(
         "-o",
@@ -117,6 +347,23 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _load_numeric_columns_from_stream(stream: TextIO) -> dict[str, list[float]]:
+    """Parse numeric columns from a CSV stream.
+
+    Parameters
+    ----------
+    stream:
+        Readable text stream positioned at the start of a CSV file.
+
+    Returns
+    -------
+    dict
+        Mapping of column name to list of float values for all numeric columns.
+
+    Raises
+    ------
+    ValueError
+        If the stream has no header row or contains no numeric data.
+    """
     reader = csv.DictReader(stream)
     if not reader.fieldnames:
         raise ValueError("CSV input has no header row.")
@@ -146,6 +393,97 @@ def _safe_filename(name: str) -> str:
     return cleaned or "column"
 
 
+def _resolve_output_dir(config: dict[str, Any]) -> Path:
+    """Return the base output directory from config, or the default.
+
+    Fallback chain: ``[output].output_dir`` → ``[output].plots_dir`` →
+    ``./spice_cli_output``.
+
+    Parameters
+    ----------
+    config:
+        Parsed YAML config dict.
+
+    Returns
+    -------
+    Path
+        Resolved output directory (not yet created).
+    """
+    output_cfg = config.get("output") or {}
+    raw = output_cfg.get("output_dir") or output_cfg.get("plots_dir")
+    if raw:
+        return Path(raw).expanduser()
+    return Path.cwd() / "spice_cli_output"
+
+
+def _write_results_csv(
+    detections: dict[str, Any],
+    output_dir: Path,
+    filename: str = "results.csv",
+) -> Path:
+    """Write detection results to a CSV file.
+
+    Handles both device-mode results ``{semantic: {group: DetectionResult}}``
+    and generic-mode results ``{column_name: DetectionResult}``.
+
+    Parameters
+    ----------
+    detections:
+        Device-mode: ``{semantic_field: {group_value: DetectionResult}}``.
+        Generic-mode: ``{column_name: DetectionResult}``.
+    output_dir:
+        Directory to write the results file into (created if needed).
+    filename:
+        Output file name. Default ``"results.csv"``.
+
+    Returns
+    -------
+    Path
+        Absolute path of the written CSV file.
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+    out_path = output_dir / filename
+
+    with out_path.open("w", encoding="utf-8", newline="") as fh:
+        writer = csv.writer(fh)
+        writer.writerow(
+            ["field", "group", "index", "x_value", "score", "threshold", "method"]
+        )
+
+        for field_name, field_data in detections.items():
+            if isinstance(field_data, DetectionResult):
+                per_group: dict[float | None, DetectionResult] = {None: field_data}
+            else:
+                per_group = field_data
+
+            for group_value, result in sorted(
+                per_group.items(), key=lambda kv: (kv[0] is None, kv[0] or 0.0)
+            ):
+                group_str = "" if group_value is None else f"{group_value:.6g}"
+                for idx in result.indices:
+                    x_val = (
+                        result.x[idx] if idx < result.x.size else float("nan")
+                    )
+                    score_val = (
+                        result.score[idx]
+                        if idx < result.score.size
+                        else float("nan")
+                    )
+                    writer.writerow(
+                        [
+                            field_name,
+                            group_str,
+                            int(idx),
+                            f"{x_val:.6g}",
+                            f"{score_val:.6g}",
+                            f"{result.threshold:.6g}",
+                            result.method,
+                        ]
+                    )
+
+    return out_path
+
+
 def _resolve_method_params(
     method: str,
     sensitivity: float | None,
@@ -153,7 +491,32 @@ def _resolve_method_params(
     min_separation: int | None,
     detection_cfg: dict[str, Any],
 ) -> dict[str, Any]:
-    """Translate CLI/config values into kwargs for ``find.detect``."""
+    """Translate CLI/config values into kwargs for ``find.detect``.
+
+    Parameters
+    ----------
+    method:
+        One of ``"simple"``, ``"higher_order"``, or ``"robust"``.
+    sensitivity:
+        Raw threshold (simple/higher_order) or sigma multiplier (robust).
+    min_prominence:
+        Robust only: minimum peak prominence.
+    min_separation:
+        Robust only: minimum index gap between flagged peaks.
+    detection_cfg:
+        ``config["detection"]`` dict for config-level fallbacks.
+
+    Returns
+    -------
+    dict
+        Keyword arguments to pass to ``find.detect``.
+
+    Raises
+    ------
+    ValueError
+        If ``method`` is simple/higher_order and no sensitivity is provided,
+        or if sensitivity is not positive.
+    """
     if method in {"simple", "higher_order"}:
         if sensitivity is None:
             raise ValueError(
@@ -236,7 +599,25 @@ def _analyze_device(
 ) -> dict[str, dict[float | None, DetectionResult]]:
     """Run method-dispatched detection per dependent field and per group.
 
-    Returns ``{semantic_field: {group_value: DetectionResult}}``.
+    Parameters
+    ----------
+    columns:
+        All numeric columns loaded from CSV.
+    device:
+        Active device providing field → column mappings.
+    method:
+        Detection method name.
+    method_params:
+        Keyword arguments for ``find.detect``.
+    plot_config:
+        ``PlotConfig`` providing the grouping column, or ``None`` for no grouping.
+    error_stream:
+        Stream for warning messages.
+
+    Returns
+    -------
+    dict
+        ``{semantic_field: {group_value: DetectionResult}}``.
     """
     if device.independent_column not in columns:
         return {}
@@ -293,7 +674,24 @@ def _generic_column_summary(
     method_params: dict[str, Any],
     error_stream: TextIO,
 ) -> dict[str, DetectionResult]:
-    """Run detection on every numeric column vs row index (no device config)."""
+    """Run detection on every numeric column vs row index (no device config).
+
+    Parameters
+    ----------
+    columns:
+        Numeric columns from CSV.
+    method:
+        Detection method name.
+    method_params:
+        Keyword arguments for ``find.detect``.
+    error_stream:
+        Stream for warning messages.
+
+    Returns
+    -------
+    dict
+        ``{column_name: DetectionResult}``.
+    """
     results: dict[str, DetectionResult] = {}
     for name, values in columns.items():
         if len(values) < 2:
@@ -314,6 +712,22 @@ def _write_device_summary(
     results: dict[str, dict[float | None, DetectionResult]],
     output: TextIO,
 ) -> int:
+    """Print a per-field, per-group discontinuity summary for a device.
+
+    Parameters
+    ----------
+    device:
+        Active device.
+    results:
+        ``{semantic_field: {group_value: DetectionResult}}``.
+    output:
+        Stream to write the summary to.
+
+    Returns
+    -------
+    int
+        Total number of discontinuities found across all fields and groups.
+    """
     total = 0
     field_count = len(results)
     print(
@@ -333,7 +747,8 @@ def _write_device_summary(
             x_str = ", ".join(f"{v:.6g}" for v in xs)
             gtag = "all" if group_value is None else f"{group_value:.6g}"
             print(
-                f"  group={gtag}: {result.indices.size} at x=[{x_str}] (method={result.method}, thr={result.threshold:.3g})",
+                f"  group={gtag}: {result.indices.size} at x=[{x_str}] "
+                f"(method={result.method}, thr={result.threshold:.3g})",
                 file=output,
             )
     if total == 0:
@@ -346,6 +761,20 @@ def _write_device_summary(
 def _write_generic_summary(
     results: dict[str, DetectionResult], output: TextIO
 ) -> int:
+    """Print a per-column discontinuity summary (no device).
+
+    Parameters
+    ----------
+    results:
+        ``{column_name: DetectionResult}``.
+    output:
+        Stream to write the summary to.
+
+    Returns
+    -------
+    int
+        Total number of discontinuities found.
+    """
     print(f"Analyzed {len(results)} numeric column(s).", file=output)
     total = sum(r.indices.size for r in results.values())
     if total == 0:
@@ -371,18 +800,28 @@ def _render_plots(
     columns: dict[str, list[float]],
     device: Device,
     detections_by_field: dict[str, dict[float | None, DetectionResult]],
-    config: dict[str, Any],
+    plot_config,
     output_stream: TextIO,
     error_stream: TextIO,
 ) -> None:
-    """Render the four focused plots for each analyzed dependent field."""
-    from .plot import load_plot_config, render_iv_plots
+    """Render the four focused plots for each analyzed dependent field.
 
-    try:
-        plot_config = load_plot_config(config, device)
-    except ValueError as exc:
-        print(f"warning: plotting disabled: {exc}", file=error_stream)
-        return
+    Parameters
+    ----------
+    columns:
+        All numeric columns loaded from CSV.
+    device:
+        Active device providing field → column mappings.
+    detections_by_field:
+        ``{semantic_field: {group_value: DetectionResult}}``.
+    plot_config:
+        Populated ``PlotConfig`` instance.
+    output_stream:
+        Stream for progress messages.
+    error_stream:
+        Stream for warning messages.
+    """
+    from .plot import render_iv_plots
 
     if not detections_by_field:
         return
@@ -405,12 +844,8 @@ def _render_plots(
         else:
             selected = [None] if None in groups else []  # type: ignore[list-item]
 
-        groups_to_plot = {
-            k: groups[k] for k in selected if k in groups
-        }
-        dets_to_plot = {
-            k: per_group[k] for k in selected if k in per_group
-        }
+        groups_to_plot = {k: groups[k] for k in selected if k in groups}
+        dets_to_plot = {k: per_group[k] for k in selected if k in per_group}
         if not groups_to_plot:
             continue
 
@@ -583,6 +1018,29 @@ def main(
     stdout: TextIO | None = None,
     stderr: TextIO | None = None,
 ) -> int:
+    """Run the spice-cli workflow.
+
+    Parameters
+    ----------
+    argv:
+        Argument list. If None, reads from ``sys.argv``.
+    stdin:
+        Input stream. Defaults to ``sys.stdin``.
+    stdout:
+        Output stream. Defaults to ``sys.stdout``.
+    stderr:
+        Error stream. Defaults to ``sys.stderr``.
+
+    Returns
+    -------
+    int
+        Exit code: 0 on success, 2 on usage or configuration error.
+
+    Side effects:
+        Always writes a ``results.csv`` to the output directory.
+        Writes four JPEG plots per field when ``-p`` is given or ``[plots]``
+        is present in config.
+    """
     parser = _build_parser()
     args = parser.parse_args(argv)
 
@@ -590,10 +1048,20 @@ def main(
     output_stream = stdout if stdout is not None else sys.stdout
     error_stream = stderr if stderr is not None else sys.stderr
 
+    if args.help_format:
+        print(_HELP_FORMAT_TOPICS[args.help_format], file=output_stream)
+        return 0
+
     if args.inject:
         return _run_inject(args, input_stream, output_stream, error_stream)
 
-    config = _load_config()
+    config_path = Path(args.config).expanduser() if args.config else None
+    try:
+        config = _load_config(config_path)
+    except FileNotFoundError:
+        print(f"error: config file not found: {args.config}", file=error_stream)
+        return 2
+
     detection_cfg = config.get("detection") or {}
 
     method = args.method or detection_cfg.get("method") or DEFAULT_METHOD
@@ -656,29 +1124,42 @@ def main(
         and any(v in columns for _, v in device.dependent_items())
     )
 
+    base_output_dir = _resolve_output_dir(config)
+
     try:
         if use_device:
             from .plot import load_plot_config
 
+            want_plots = args.plot or ("plots" in config)
             plot_config = None
-            try:
-                plot_config = load_plot_config(config, device)
-            except ValueError:
-                plot_config = None
+            if want_plots:
+                try:
+                    plot_config = load_plot_config(
+                        config, device, fallback_output_dir=base_output_dir
+                    )
+                except ValueError as exc:
+                    print(f"warning: plotting disabled: {exc}", file=error_stream)
 
             detections = _analyze_device(
                 columns, device, method, method_params, plot_config, error_stream
             )
             _write_device_summary(device, detections, output_stream)
+
+            csv_path = _write_results_csv(detections, base_output_dir)
+            print(f"Results written to {csv_path}", file=output_stream)
+
             if plot_config is not None and detections:
                 _render_plots(
-                    columns, device, detections, config, output_stream, error_stream
+                    columns, device, detections, plot_config, output_stream, error_stream
                 )
         else:
             results = _generic_column_summary(
                 columns, method, method_params, error_stream
             )
             _write_generic_summary(results, output_stream)
+
+            csv_path = _write_results_csv(results, base_output_dir)
+            print(f"Results written to {csv_path}", file=output_stream)
     except ValueError as exc:
         print(f"error: {exc}", file=error_stream)
         return 2

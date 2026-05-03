@@ -56,7 +56,29 @@ class DetectionResult:
 
 
 def load_csv_numeric_columns(path: str | Path) -> dict[str, list[float]]:
-    """Load numeric columns from a CSV file."""
+    """Load numeric columns from a CSV file.
+
+    A column is included if at least one cell parses as float; non-parseable
+    cells within a numeric column are silently skipped.
+
+    Parameters
+    ----------
+    path:
+        Path to a UTF-8 CSV file with a header row.
+
+    Returns
+    -------
+    dict
+        ``{column_name: [float, ...]}`` for every column containing at least
+        one parseable float value.
+
+    Raises
+    ------
+    ValueError
+        If the file has no header row or contains no numeric data.
+    OSError
+        If the file cannot be opened.
+    """
     source = Path(path)
     with source.open(newline="", encoding="utf-8") as handle:
         reader = csv.DictReader(handle)
@@ -81,7 +103,27 @@ def load_csv_numeric_columns(path: str | Path) -> dict[str, list[float]]:
 
 
 def find_discontinuities(values: list[float], threshold: float) -> list[Discontinuity]:
-    """Detect step discontinuities where adjacent delta exceeds threshold."""
+    """Detect step discontinuities where adjacent delta exceeds threshold.
+
+    Flags index ``i`` when ``|values[i] - values[i-1]| >= threshold``.
+
+    Parameters
+    ----------
+    values:
+        Ordered numeric series to scan.
+    threshold:
+        Minimum absolute difference to flag. Must be positive.
+
+    Returns
+    -------
+    list[Discontinuity]
+        One entry per flagged transition, in ascending index order.
+
+    Raises
+    ------
+    ValueError
+        If ``threshold <= 0``.
+    """
     if threshold <= 0:
         raise ValueError("threshold must be positive.")
     if len(values) < 2:
@@ -98,7 +140,22 @@ def find_discontinuities(values: list[float], threshold: float) -> list[Disconti
 def analyze_csv_discontinuities(
     path: str | Path, threshold: float = 1.0
 ) -> dict[str, list[Discontinuity]]:
-    """Analyze all numeric CSV columns for discontinuities."""
+    """Analyze all numeric CSV columns for discontinuities.
+
+    Delegates to ``load_csv_numeric_columns`` then ``find_discontinuities``.
+
+    Parameters
+    ----------
+    path:
+        Path to a CSV file with a header row.
+    threshold:
+        Absolute delta threshold passed to ``find_discontinuities``.
+
+    Returns
+    -------
+    dict
+        ``{column_name: [Discontinuity, ...]}`` for every numeric column.
+    """
     columns = load_csv_numeric_columns(path)
     return {
         column_name: find_discontinuities(values, threshold)
@@ -113,9 +170,26 @@ def detect_discontinuities_higher_order(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Compute a higher-order discontinuity score from SPICE V/I data.
 
-    Returns (vgs_mid3, fda_2, final_score). The optional threshold argument is
-    accepted for API symmetry but not applied here; use
-    ``get_discontinuity_indices`` to threshold the score.
+    Builds three progressively shorter grids:
+    - ``fda_1`` (length N-1) — first finite difference on ``vgs`` grid
+    - ``fda_2`` (length N-2) — second finite difference on ``vgs_mid1`` grid
+    - ``final_score`` (length N-3) — relative jump in ``fda_2``, normalized by Δx
+
+    Parameters
+    ----------
+    vgs:
+        Gate voltage array (independent axis), length N.
+    ids:
+        Drain current array (dependent axis), length N.
+    threshold:
+        Accepted for API symmetry; not applied here. Use
+        ``get_discontinuity_indices`` to threshold the returned score.
+
+    Returns
+    -------
+    tuple
+        ``(vgs_mid3, fda_2, final_score)`` with shapes
+        ``(N-3,)``, ``(N-2,)``, ``(N-3,)``.
     """
     vgs = np.asarray(vgs, dtype=float)
     ids = np.asarray(ids, dtype=float)
@@ -134,7 +208,20 @@ def detect_discontinuities_higher_order(
 
 
 def get_discontinuity_indices(final_score: np.ndarray, threshold: float) -> np.ndarray:
-    """Return indices of ``final_score`` that exceed ``threshold``."""
+    """Return indices of ``final_score`` that exceed ``threshold``.
+
+    Parameters
+    ----------
+    final_score:
+        1-D score array (e.g. from ``detect_discontinuities_higher_order``).
+    threshold:
+        Minimum score value to flag.
+
+    Returns
+    -------
+    np.ndarray
+        Integer array of flagged indices.
+    """
     return np.where(final_score > threshold)[0]
 
 
@@ -222,6 +309,30 @@ def detect_robust(
 
     A real discontinuity must rise *and fall* in z-space, so it is always
     a peak. Plateaus are ignored.
+
+    Parameters
+    ----------
+    x:
+        Independent axis (e.g. gate voltage), length N >= 4.
+    y:
+        Dependent axis (e.g. drain current), length N >= 4.
+    sigma:
+        Minimum MAD-z-score height for a peak to be flagged. Default 50.0.
+    min_prominence:
+        Minimum peak prominence above surrounding valleys. Default 20.0.
+    min_separation:
+        Minimum index distance between flagged peaks. Default 3.
+
+    Returns
+    -------
+    DetectionResult
+        Structured result with ``x``, ``fda_2``, ``score``, ``indices``,
+        ``threshold`` (= ``sigma``), and ``method="robust"``.
+
+    Raises
+    ------
+    ValueError
+        If ``len(x) < 4`` (propagated from ``score_series``).
     """
     x_mid3, fda_2, score = score_series(x, y)
 
@@ -303,11 +414,33 @@ def _detect_higher_order(
 def detect(method: str, x: np.ndarray, y: np.ndarray, **params) -> DetectionResult:
     """Dispatch to the named detection method.
 
-    Accepted methods and parameters:
-        - ``"simple"``: ``threshold`` (required, > 0)
-        - ``"higher_order"``: ``threshold`` (required, > 0)
-        - ``"robust"``: ``sigma`` (default 8.0), ``min_prominence_sigma``
-          (default 3.0), ``min_separation`` (default 3)
+    Parameters
+    ----------
+    method:
+        One of ``"simple"``, ``"higher_order"``, or ``"robust"``.
+    x:
+        Independent axis array (e.g. gate voltage), length N.
+    y:
+        Dependent axis array (e.g. drain current), length N.
+    **params:
+        Method-specific keyword arguments:
+
+        - ``"simple"``: ``threshold`` (float, required, > 0)
+        - ``"higher_order"``: ``threshold`` (float, required, > 0)
+        - ``"robust"``: ``sigma`` (float, default 50.0),
+          ``min_prominence`` (float, default 20.0),
+          ``min_separation`` (int, default 3)
+
+    Returns
+    -------
+    DetectionResult
+        Structured result with score, flagged indices, and method metadata.
+
+    Raises
+    ------
+    ValueError
+        If *method* is unknown, or if ``threshold <= 0`` for simple/higher_order,
+        or if the input is too short for the chosen method.
     """
     if method == "simple":
         return _detect_simple(x, y, **params)

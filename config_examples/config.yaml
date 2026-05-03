@@ -1,0 +1,55 @@
+general:
+  log_level: "info"
+
+output:
+  # output_dir: base directory for results.csv and all generated files.
+  # Default when unset: spice_cli_output/ under the current working directory.
+  output_dir: "spice_cli_output"
+  # plots_dir: legacy alias for output_dir (still recognized as a fallback).
+  plots_dir: "spice_plots"
+
+detection:
+  # method: "simple" | "higher_order" | "robust"
+  #   - simple / higher_order: `sensitivity` is a raw score threshold (> 0).
+  #   - robust: `sensitivity` overrides the default σ multiplier on MAD (default 50.0).
+  method: "robust"
+  sensitivity: 5.0
+  min_prominence: 20.0
+  min_separation: 3
+
+inputs:
+  files:
+    - "tests/files/simulation_data_sample.csv"
+
+analysis:
+  device: "FET"
+
+devices:
+  FET:
+    independent: "gate_voltage"
+    sweep: "X"
+    bulk_voltage: "VBULK"
+    temperature: "TEMPERATURE"
+    gate_voltage: "V(X1.GATE,X1.SOURCE)"
+    drain_current: "I(VDRAIN)"
+    source_bulk_voltage: "V(X1.SOURCE,X1.BULK)"
+
+plots:
+  figsize: [16, 12]
+  dpi: 180
+  ids_ylabel: "$I_D$ (µA)"
+  ids_unit_scale: 1.0e6
+  vgs_xlabel: "$V_{GS}$ (V)"
+  vgs_xlim: [0.0, 1.8]
+  vgs_tick_step: 0.2
+  zoom_padding: 0.05
+  zoom_merge_within: 0.02
+  title_prefix: "NFET"
+  grouping:
+    # Family-of-curves axis. `field` is a semantic key from devices.<active>.
+    field: "source_bulk_voltage"
+    min: 0.0
+    max: 1.5
+    step: 0.1
+    skip: []
+    label_template: "$V_{{SB}} = {value:.2f}$ V"

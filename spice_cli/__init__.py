@@ -594,7 +594,7 @@ def _analyze_device(
     device: Device,
     method: str,
     method_params: dict[str, Any],
-    plot_config,
+    grouping_col: str | None,
     error_stream: TextIO,
 ) -> dict[str, dict[float | None, DetectionResult]]:
     """Run method-dispatched detection per dependent field and per group.
@@ -609,8 +609,9 @@ def _analyze_device(
         Detection method name.
     method_params:
         Keyword arguments for ``find.detect``.
-    plot_config:
-        ``PlotConfig`` providing the grouping column, or ``None`` for no grouping.
+    grouping_col:
+        CSV column name to partition rows by before detection, or ``None``
+        for no grouping.  Comes from ``analysis.group_by`` in config.
     error_stream:
         Stream for warning messages.
 
@@ -621,8 +622,6 @@ def _analyze_device(
     """
     if device.independent_column not in columns:
         return {}
-
-    grouping_col = plot_config.grouping_column if plot_config else None
 
     results: dict[str, dict[float | None, DetectionResult]] = {}
     for semantic, csv_name in device.dependent_items():
@@ -673,6 +672,7 @@ def _generic_column_summary(
     method: str,
     method_params: dict[str, Any],
     error_stream: TextIO,
+    independent_col: str | None = None,
 ) -> dict[str, DetectionResult]:
     """Run detection on every numeric column vs row index (no device config).
 
@@ -686,18 +686,28 @@ def _generic_column_summary(
         Keyword arguments for ``find.detect``.
     error_stream:
         Stream for warning messages.
+    independent_col:
+        Optional CSV column name to use as the x-axis. When set and present,
+        that column is used as x for all other columns and skipped as a y-series.
+        When absent or not in columns, row index is used as x (existing behavior).
 
     Returns
     -------
     dict
         ``{column_name: DetectionResult}``.
     """
+    x_override: np.ndarray | None = None
+    if independent_col and independent_col in columns:
+        x_override = np.asarray(columns[independent_col], dtype=float)
+
     results: dict[str, DetectionResult] = {}
     for name, values in columns.items():
+        if independent_col and name == independent_col:
+            continue
         if len(values) < 2:
             continue
         y = np.asarray(values, dtype=float)
-        x = np.arange(y.size, dtype=float)
+        x = x_override if x_override is not None else np.arange(y.size, dtype=float)
         if method == "robust" and y.size < 4:
             continue
         try:
@@ -1130,6 +1140,17 @@ def main(
         if use_device:
             from .plot import load_plot_config
 
+            group_by_semantic = config.get("analysis", {}).get("group_by")
+            grouping_col: str | None = None
+            if group_by_semantic:
+                grouping_col = device.fields.get(group_by_semantic)
+                if grouping_col is None:
+                    print(
+                        f"warning: analysis.group_by '{group_by_semantic}' "
+                        f"not found in device '{device.name}'",
+                        file=error_stream,
+                    )
+
             want_plots = args.plot or ("plots" in config)
             plot_config = None
             if want_plots:
@@ -1141,7 +1162,7 @@ def main(
                     print(f"warning: plotting disabled: {exc}", file=error_stream)
 
             detections = _analyze_device(
-                columns, device, method, method_params, plot_config, error_stream
+                columns, device, method, method_params, grouping_col, error_stream
             )
             _write_device_summary(device, detections, output_stream)
 
@@ -1153,8 +1174,10 @@ def main(
                     columns, device, detections, plot_config, output_stream, error_stream
                 )
         else:
+            independent_col = config.get("analysis", {}).get("independent_col")
             results = _generic_column_summary(
-                columns, method, method_params, error_stream
+                columns, method, method_params, error_stream,
+                independent_col=independent_col,
             )
             _write_generic_summary(results, output_stream)
 

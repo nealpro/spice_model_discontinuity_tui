@@ -47,10 +47,10 @@ Method details:
 - [`docs/HIGHER_ORDER.md`](docs/HIGHER_ORDER.md)
 - [`docs/ROBUST.md`](docs/ROBUST.md)
 
-If a device is configured, the CLI maps semantic fields from TOML into CSV
+If a device is configured, the CLI maps semantic fields from YAML into CSV
 columns and analyzes each dependent field against the declared independent
 axis. If you run it with no input path on an interactive terminal, it can fall
-back to the first configured entry in `[inputs].files`. When plotting is
+back to the first configured entry in `inputs.files`. When plotting is
 configured, it writes:
 
 - `iv_full.jpg`
@@ -109,12 +109,12 @@ The default robust settings are conservative:
 User config lives at:
 
 ```text
-~/.config/spice_cli/config.toml
+~/.config/spice_cli/config.yaml
 ```
 
 CLI flags override config values.
 
-`config_examples/config.toml` provides an example configuration.
+`config_examples/config.yaml` provides an example configuration.
 
 ### `detection`
 
@@ -131,7 +131,7 @@ Default detector settings.
 
 | Key | Meaning |
 | --- | --- |
-| `device` | Active device name from `[devices.<NAME>]` |
+| `device` | Active device name from `devices.<NAME>` |
 
 ### `devices.<NAME>`
 
@@ -144,19 +144,20 @@ Each device table maps semantic names to CSV columns.
 
 Example:
 
-```toml
-[devices.FET]
-independent = "gate_voltage"
-gate_voltage = "VGS"
-drain_current = "ID"
-source_bulk_voltage = "VSB"
+```yaml
+devices:
+  FET:
+    independent: "gate_voltage"
+    gate_voltage: "VGS"
+    drain_current: "ID"
+    source_bulk_voltage: "VSB"
 ```
 
 ### `plots`
 
 | Key | Meaning |
 | --- | --- |
-| `output_dir` | Directory for generated plots (`[output].plots_dir` also works) |
+| `output_dir` | Directory for generated plots (`output.plots_dir` also works) |
 | `figsize` | Figure size pair |
 | `dpi` | Image resolution |
 | `ids_ylabel` | Y-axis label for current plots |

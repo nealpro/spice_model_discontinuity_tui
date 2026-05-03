@@ -4,9 +4,9 @@
 
 | | Path |
 |---|---|
-| Default | `~/.config/spice_cli/config.toml` |
-| Override | `spice-cli -c /path/to/config.toml` |
-| Format | [TOML](https://toml.io) |
+| Default | `~/.config/spice_cli/config.yaml` |
+| Override | `spice-cli -c /path/to/config.yaml` |
+| Format | YAML |
 
 CLI flags take priority over all config values.
 
@@ -21,9 +21,9 @@ Base directory for all generated files (results CSV and plots).
 | `output_dir` | string | `spice_cli_output/` in cwd | Base output directory for results and plots |
 | `plots_dir` | string | — | Legacy alias; used as a fallback if `output_dir` is not set |
 
-```toml
-[output]
-output_dir = "spice_cli_output"
+```yaml
+output:
+  output_dir: "spice_cli_output"
 ```
 
 When neither key is set, output goes to `spice_cli_output/` under the current working directory.
@@ -41,12 +41,12 @@ Default detection parameters. CLI flags override these.
 | `min_prominence` | float | 20.0 | `robust` only |
 | `min_separation` | int | 3 | `robust` only |
 
-```toml
-[detection]
-method         = "robust"
-sensitivity    = 50.0
-min_prominence = 20.0
-min_separation = 3
+```yaml
+detection:
+  method: "robust"
+  sensitivity: 50.0
+  min_prominence: 20.0
+  min_separation: 3
 ```
 
 - **`method`**: `"simple"` | `"higher_order"` | `"robust"`. See [SIMPLE.md](SIMPLE.md), [HIGHER_ORDER.md](HIGHER_ORDER.md), [ROBUST.md](ROBUST.md).
@@ -64,9 +64,10 @@ Fallback input files used when no file argument is given and stdin is an interac
 |---|---|---|
 | `files` | array of strings | CSV file paths; the first entry is used |
 
-```toml
-[inputs]
-files = ["data/nmos.csv"]
+```yaml
+inputs:
+  files:
+    - "data/nmos.csv"
 ```
 
 ---
@@ -77,9 +78,9 @@ files = ["data/nmos.csv"]
 |---|---|---|
 | `device` | string | Name of the active `[devices.<NAME>]` table |
 
-```toml
-[analysis]
-device = "FET"
+```yaml
+analysis:
+  device: "FET"
 ```
 
 Override per-run with `--device NAME`.
@@ -104,12 +105,13 @@ Maps semantic field names to CSV column headers. Add a new device by adding a ne
 
 Column name matching is **case-sensitive and exact**, including spaces and parentheses. LTspice-style names like `V(X1.GATE,X1.SOURCE)` are supported.
 
-```toml
-[devices.NFET]
-independent         = "gate_voltage"
-gate_voltage        = "V(X1.GATE,X1.SOURCE)"
-drain_current       = "I(VDRAIN)"
-source_bulk_voltage = "V(X1.SOURCE,X1.BULK)"
+```yaml
+devices:
+  NFET:
+    independent: "gate_voltage"
+    gate_voltage: "V(X1.GATE,X1.SOURCE)"
+    drain_current: "I(VDRAIN)"
+    source_bulk_voltage: "V(X1.SOURCE,X1.BULK)"
 ```
 
 In this example, `gate_voltage` is the x-axis; `drain_current` and `source_bulk_voltage` are the fields analyzed for discontinuities.
@@ -136,17 +138,17 @@ In this example, `gate_voltage` is the x-axis; `drain_current` and `source_bulk_
 | `zoom_merge_within` | float | `0.02` | Merge zoom windows within this x-distance |
 | `title_prefix` | string | `""` | Prefix prepended to each plot title |
 
-```toml
-[plots]
-output_dir      = "spice_plots"
-figsize         = [16, 9]
-dpi             = 200
-ids_ylabel      = "$I_D$ (µA)"
-ids_unit_scale  = 1e6
-vgs_xlabel      = "$V_{GS}$ (V)"
-vgs_xlim        = [0.0, 1.8]
-vgs_tick_step   = 0.2
-title_prefix    = "NFET"
+```yaml
+plots:
+  output_dir: "spice_plots"
+  figsize: [16, 9]
+  dpi: 200
+  ids_ylabel: "$I_D$ (µA)"
+  ids_unit_scale: 1.0e6
+  vgs_xlabel: "$V_{GS}$ (V)"
+  vgs_xlim: [0.0, 1.8]
+  vgs_tick_step: 0.2
+  title_prefix: "NFET"
 ```
 
 ### Output files
@@ -179,28 +181,30 @@ Filter chain order: **min → max → skip → step**.
 
 Use `{{ }}` to escape literal braces in LaTeX label strings.
 
-```toml
-[plots.grouping]
-field          = "source_bulk_voltage"
-min            = 0.0
-max            = 1.5
-step           = 0.1
-skip           = []
-label_template = "$V_{{SB}} = {value:.2f}$ V"
+```yaml
+plots:
+  grouping:
+    field: "source_bulk_voltage"
+    min: 0.0
+    max: 1.5
+    step: 0.1
+    skip: []
+    label_template: "$V_{{SB}} = {value:.2f}$ V"
 ```
 
 ---
 
 ## Minimal Working Config
 
-```toml
-[analysis]
-device = "FET"
+```yaml
+analysis:
+  device: "FET"
 
-[devices.FET]
-independent   = "gate_voltage"
-gate_voltage  = "V(X1.GATE,X1.SOURCE)"
-drain_current = "I(VDRAIN)"
+devices:
+  FET:
+    independent: "gate_voltage"
+    gate_voltage: "V(X1.GATE,X1.SOURCE)"
+    drain_current: "I(VDRAIN)"
 ```
 
 Detection uses `robust` defaults. Results go to `spice_cli_output/results.csv`. No plots are generated unless `-p` is passed.
@@ -209,4 +213,4 @@ Detection uses `robust` defaults. Results go to `spice_cli_output/results.csv`. 
 
 ## Full Annotated Example
 
-See [`config_examples/config.toml`](../config_examples/config.toml) for a complete example with all sections populated.
+See [`config_examples/config.yaml`](../config_examples/config.yaml) for a complete example with all sections populated.

@@ -1,6 +1,6 @@
 """Declarative device field mappings for SPICE CSV columns.
 
-Each ``[devices.<NAME>]`` table in the TOML config declares:
+Each ``devices.<NAME>`` table in the YAML config declares:
 
 - ``independent`` — the key inside the table whose value is the CSV column to
   use as the derivative x-axis.
@@ -8,7 +8,7 @@ Each ``[devices.<NAME>]`` table in the TOML config declares:
   the fields that get analyzed for discontinuities against the independent
   axis.
 
-New device types are added purely in TOML; no code change is required here.
+New device types are added purely in YAML; no code change is required here.
 """
 
 from dataclasses import dataclass
@@ -28,7 +28,7 @@ class Device:
     Attributes
     ----------
     name:
-        Device identifier (matches the ``[devices.<NAME>]`` TOML key).
+        Device identifier (matches the ``devices.<NAME>`` YAML key).
     independent:
         Semantic key of the x-axis field within *fields*.
     fields:
@@ -55,7 +55,7 @@ def load_devices(config: dict[str, Any]) -> dict[str, Device]:
     Parameters
     ----------
     config:
-        Parsed TOML config dict. Device tables live under the ``"devices"`` key.
+        Parsed YAML config dict. Device tables live under the ``"devices"`` key.
 
     Returns
     -------
@@ -98,7 +98,7 @@ def active_device(config: dict[str, Any], override: str | None = None) -> Device
     Parameters
     ----------
     config:
-        Parsed TOML config dict.
+        Parsed YAML config dict.
     override:
         Device name from the ``--device`` CLI flag. Takes priority over config.
 

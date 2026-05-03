@@ -7,8 +7,8 @@ Produces exactly four views:
     fda2_full.jpg   — d²Ids/dVgs² vs Vgs, same groups
     fda2_zoom.jpg   — d²Ids/dVgs², same x-window as iv_zoom
 
-Group filtering (family-of-curves) is driven by ``[plots.grouping]`` in the
-user TOML config, mirroring the VBULK filter knobs the user has been using
+Group filtering (family-of-curves) is driven by ``plots.grouping`` in the
+user YAML config, mirroring the VBULK filter knobs the user has been using
 manually. The zoom pair is skipped when no group flags any discontinuity.
 """
 
@@ -82,18 +82,18 @@ def load_plot_config(
     *,
     fallback_output_dir: Path | None = None,
 ) -> PlotConfig:
-    """Read ``[plots]`` + ``[plots.grouping]`` from the TOML dict.
+    """Read ``plots`` + ``plots.grouping`` from the YAML config dict.
 
     Parameters
     ----------
     config:
-        Parsed TOML config dict.
+        Parsed YAML config dict.
     device:
-        Active device, used to resolve semantic field names in ``[plots.grouping]``.
+        Active device, used to resolve semantic field names in ``plots.grouping``.
         Pass ``None`` if no device is active.
     fallback_output_dir:
-        Base directory to use when neither ``[plots].output_dir`` nor
-        ``[output].output_dir``/``[output].plots_dir`` is set.
+        Base directory to use when neither ``plots.output_dir`` nor
+        ``output.output_dir``/``output.plots_dir`` is set.
         Plots land in ``<fallback_output_dir>/plots/``.
 
     Returns

@@ -6,7 +6,7 @@ import argparse
 import csv
 import re
 import sys
-import tomllib
+import yaml
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Sequence, TextIO
@@ -17,7 +17,7 @@ from .devices import Device, active_device
 from spice_discontinuity.find import DetectionResult, detect as find_detect
 from spice_discontinuity.inject import inject_random_spikes
 
-_DEFAULT_CONFIG_PATH = Path("~/.config/spice_cli/config.toml").expanduser()
+_DEFAULT_CONFIG_PATH = Path("~/.config/spice_cli/config.yaml").expanduser()
 
 VALID_METHODS = ("simple", "higher_order", "robust")
 DEFAULT_METHOD = "robust"
@@ -26,59 +26,59 @@ _HELP_FORMAT_TOPICS: dict[str, str] = {
     "config": """\
 CONFIG FILE FORMAT
 ==================
-Default path: ~/.config/spice_cli/config.toml
-Override with: spice-cli -c /path/to/config.toml
-Format: TOML (https://toml.io)
+Default path: ~/.config/spice_cli/config.yaml
+Override with: spice-cli -c /path/to/config.yaml
+Format: YAML
 
 Sections recognized:
 
-  [output]
-  output_dir = "spice_cli_output"   # base directory for all output files
+  output:
+    output_dir: "spice_cli_output"   # base directory for all output files
 
-  [detection]
-  method         = "robust"          # "simple" | "higher_order" | "robust"
-  sensitivity    = 50.0              # threshold (simple/higher_order) or z-score sigma (robust)
-  min_prominence = 20.0              # robust only: minimum peak prominence
-  min_separation = 3                 # robust only: minimum index gap between peaks
+  detection:
+    method: "robust"                 # "simple" | "higher_order" | "robust"
+    sensitivity: 50.0               # threshold (simple/higher_order) or z-score sigma (robust)
+    min_prominence: 20.0            # robust only: minimum peak prominence
+    min_separation: 3               # robust only: minimum index gap between peaks
 
-  [inputs]
-  files = ["data/nmos.csv"]          # fallback file(s) when stdin is a terminal
+  inputs:
+    files: ["data/nmos.csv"]         # fallback file(s) when stdin is a terminal
 
-  [analysis]
-  device = "FET"                     # active device (must match a [devices.<NAME>] table)
+  analysis:
+    device: "FET"                    # active device (must match a devices.<NAME> table)
 
-  [devices.FET]
-  independent         = "gate_voltage"
-  gate_voltage        = "V(X1.GATE,X1.SOURCE)"
-  drain_current       = "I(VDRAIN)"
-  source_bulk_voltage = "V(X1.SOURCE,X1.BULK)"
+  devices:
+    FET:
+      independent: "gate_voltage"
+      gate_voltage: "V(X1.GATE,X1.SOURCE)"
+      drain_current: "I(VDRAIN)"
+      source_bulk_voltage: "V(X1.SOURCE,X1.BULK)"
 
-  [plots]                            # presence of this section enables plotting
-  output_dir      = "spice_plots"
-  figsize         = [16, 9]
-  dpi             = 200
-  ids_ylabel      = "$I_D$"
-  ids_unit_scale  = 1.0
-  vgs_xlabel      = "$V_{{GS}}$ (V)"
-  vgs_xlim        = [0.0, 1.8]
-  vgs_tick_step   = 0.2
-  title_prefix    = "NFET"
+  plots:                             # presence of this section enables plotting
+    output_dir: "spice_plots"
+    figsize: [16, 9]
+    dpi: 200
+    ids_ylabel: "$I_D$"
+    ids_unit_scale: 1.0
+    vgs_xlabel: "$V_{GS}$ (V)"
+    vgs_xlim: [0.0, 1.8]
+    vgs_tick_step: 0.2
+    title_prefix: "NFET"
+    grouping:
+      field: "source_bulk_voltage"
+      min: 0.0
+      max: 1.5
+      step: 0.1
+      skip: []
+      label_template: "$V_{{SB}} = {value:.2f}$ V"
 
-  [plots.grouping]
-  field          = "source_bulk_voltage"
-  min            = 0.0
-  max            = 1.5
-  step           = 0.1
-  skip           = []
-  label_template = "$V_{{SB}} = {value:.2f}$ V"
-
-See config_examples/config.toml for a fully annotated example.\
+See config_examples/config.yaml for a fully annotated example.\
 """,
     "device": """\
 DEVICE FORMAT
 =============
 A device maps semantic field names to CSV column headers.
-Defined under [devices.<NAME>] in config.toml.
+Defined under devices.<NAME> in config.yaml.
 
 Required key:
   independent = "<field_name>"   points to the x-axis field in this table
@@ -90,20 +90,21 @@ Column name matching is case-sensitive and must be exact, including spaces
 and parentheses (e.g. LTspice exports columns like "V(X1.GATE,X1.SOURCE)").
 
 Example:
-  [devices.NFET]
-  independent         = "gate_voltage"
-  gate_voltage        = "V(X1.GATE,X1.SOURCE)"
-  drain_current       = "I(VDRAIN)"
-  source_bulk_voltage = "V(X1.SOURCE,X1.BULK)"
+  devices:
+    NFET:
+      independent: "gate_voltage"
+      gate_voltage: "V(X1.GATE,X1.SOURCE)"
+      drain_current: "I(VDRAIN)"
+      source_bulk_voltage: "V(X1.SOURCE,X1.BULK)"
 
 Activate in config:
-  [analysis]
-  device = "NFET"
+  analysis:
+    device: "NFET"
 
 Or per-run with the --device flag:
   spice-cli data.csv --device NFET
 
-Adding a new device type requires only a TOML change — no code change.\
+Adding a new device type requires only a YAML change — no code change.\
 """,
     "csv": """\
 CSV INPUT FORMAT
@@ -139,9 +140,9 @@ Plotting is ONLY supported for DC sweep data.
 
 Plots are generated when either:
   - The -p/--plot flag is passed, OR
-  - The [plots] section is present in the config file.
+  - The plots section is present in the config file.
 
-When -p is used without a [plots] config section, default formatting is applied.
+When -p is used without a plots config section, default formatting is applied.
 
 Output files (four per analyzed field):
   iv_full.jpg     I_D vs V_GS (full sweep)
@@ -149,7 +150,7 @@ Output files (four per analyzed field):
   fda2_full.jpg   d2I_D/dV_GS2 (full sweep)
   fda2_zoom.jpg   d2I_D/dV_GS2 (zoomed)
 
-[plots] keys and types:
+plots keys and types:
   output_dir        string          Output directory. Default: <output_dir>/plots/
   figsize           [float, float]  Figure size in inches. Default: [16.0, 9.0]
   dpi               int             Resolution. Default: 200
@@ -162,8 +163,8 @@ Output files (four per analyzed field):
   zoom_merge_within float           Merge zoom windows within this x-distance. Default: 0.02
   title_prefix      string          Prefix for all plot titles. Default: ""
 
-[plots.grouping] keys (family-of-curves):
-  field           string  Semantic field from [devices.<NAME>] used to group curves.
+plots.grouping keys (family-of-curves):
+  field           string  Semantic field from devices.<NAME> used to group curves.
   min             float   Exclude groups below this value.
   max             float   Exclude groups above this value.
   step            float   Only include groups at multiples of this interval from min.
@@ -175,18 +176,18 @@ Output files (four per analyzed field):
 
 
 def _load_config(path: Path | None = None) -> dict[str, Any]:
-    """Load TOML config from *path*, or the default user config path if None.
+    """Load YAML config from *path*, or the default user config path if None.
 
     Parameters
     ----------
     path:
         Explicit config file path. If None, defaults to
-        ``~/.config/spice_cli/config.toml``.
+        ``~/.config/spice_cli/config.yaml``.
 
     Returns
     -------
     dict
-        Parsed TOML content, or ``{}`` if the default path does not exist.
+        Parsed YAML content, or ``{}`` if the default path does not exist.
 
     Raises
     ------
@@ -195,13 +196,13 @@ def _load_config(path: Path | None = None) -> dict[str, Any]:
     """
     target = path if path is not None else _DEFAULT_CONFIG_PATH
     try:
-        with target.open("rb") as handle:
-            return tomllib.load(handle)
+        with target.open("r", encoding="utf-8") as handle:
+            return yaml.safe_load(handle) or {}
     except FileNotFoundError:
         if path is not None:
             raise
         return {}
-    except (OSError, tomllib.TOMLDecodeError):
+    except (OSError, yaml.YAMLError):
         return {}
 
 
@@ -227,7 +228,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "  spice-cli data.csv --method robust -s 30 --min-prominence 10\n"
             "  spice-cli data.csv -p\n"
             "  spice-cli data.csv --device FET -p\n"
-            "  spice-cli data.csv -c ~/myproject/config.toml\n"
+            "  spice-cli data.csv -c ~/myproject/config.yaml\n"
             "  cat data.csv | spice-cli -\n"
             "  spice-cli data.csv --inject -o faulted.csv --count 5 --seed 42\n\n"
             "Use --help-format <topic> for detailed format documentation.\n"
@@ -240,7 +241,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--config",
         default=None,
         metavar="PATH",
-        help="Path to TOML config file (default: ~/.config/spice_cli/config.toml).",
+        help="Path to YAML config file (default: ~/.config/spice_cli/config.yaml).",
     )
     parser.add_argument(
         "--help-format",
@@ -401,7 +402,7 @@ def _resolve_output_dir(config: dict[str, Any]) -> Path:
     Parameters
     ----------
     config:
-        Parsed TOML config dict.
+        Parsed YAML config dict.
 
     Returns
     -------

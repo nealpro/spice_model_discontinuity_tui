@@ -4,7 +4,7 @@ io:
 
 detection:
   sensitivity: 1.0 # standard deviations
-  min_prominence: 20.0 # scipy.find-peaks
+  min_prominence: 20.0 # scipy.find_peaks
   min_separation: 3
 
 analysis:

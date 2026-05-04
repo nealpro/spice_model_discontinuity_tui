@@ -13,7 +13,6 @@ from typing import Any, Sequence, TextIO
 
 import numpy as np
 
-from .devices import Device, active_device
 from spice_discontinuity.find import DetectionResult, detect as find_detect
 from spice_discontinuity.inject import inject_random_spikes
 
@@ -23,15 +22,15 @@ _HELP_FORMAT_TOPICS: dict[str, str] = {
     "config": """\
 CONFIG FILE FORMAT
 ==================
-Default path: ~/.config/spice_cli/config.yaml
+Default path: ~/.config/discontinuity_finder/config.yaml
 Override with: discont-finder -c /path/to/config.yaml
 Format: YAML
 
 Sections recognized:
 
   io:
-    output_dir: "spice_cli_output"   # base directory for all output files
-    files: ["data/nmos.csv"]         # fallback file(s) when stdin is a terminal
+    output_dir: "spice_cli_output"   # base directory for results.csv and plots
+    files: ["data/signal.csv"]       # fallback file(s) when stdin is a terminal
 
   detection:
     sensitivity: 50.0               # robust z-score sigma threshold
@@ -39,66 +38,28 @@ Sections recognized:
     min_separation: 3               # robust only: minimum index gap between peaks
 
   analysis:
-    device: "FET"                    # active device (must match a devices.<NAME> table)
-
-  devices:
-    FET:
-      independent: "gate_voltage"
-      gate_voltage: "V(X1.GATE,X1.SOURCE)"
-      drain_current: "I(VDRAIN)"
-      source_bulk_voltage: "V(X1.SOURCE,X1.BULK)"
+    independent_col: "gate_v"       # CSV column to use as the x-axis
+    group_by: "vsb"                 # CSV column to partition rows before detection
 
   plots:                             # presence of this section enables plotting
-    output_dir: "spice_plots"
+    output_dir: "my_output"         # plots land in <output_dir>/PLOTS/
     figsize: [16, 9]
     dpi: 200
-    ids_ylabel: "$I_D$"
-    ids_unit_scale: 1.0
-    vgs_xlabel: "$V_{GS}$ (V)"
-    vgs_xlim: [0.0, 1.8]
-    vgs_tick_step: 0.2
-    title_prefix: "NFET"
+    ylabel: "Current (A)"           # default: y column name
+    unit_scale: 1.0
+    xlabel: "Voltage (V)"           # default: x column name
+    xlim: [0.0, 1.8]
+    tick_step: 0.2
+    title_prefix: "My Signal"
     grouping:
-      field: "source_bulk_voltage"
+      column: "vsb"                 # CSV column used to label curves
       min: 0.0
       max: 1.5
       step: 0.1
       skip: []
-      label_template: "$V_{{SB}} = {value:.2f}$ V"
+      label_template: "vsb = {value:.2f} V"
 
 See config_examples/config.yaml for a fully annotated example.\
-""",
-    "device": """\
-DEVICE FORMAT
-=============
-A device maps semantic field names to CSV column headers.
-Defined under devices.<NAME> in config.yaml.
-
-Required key:
-  independent: "<field_name>"   points to the x-axis field in this table
-
-All other string-valued keys are dependent fields:
-  <semantic_name>: "<CSV column header>"
-
-Column name matching is case-sensitive and must be exact, including spaces
-and parentheses (e.g. LTspice exports columns like "V(X1.GATE,X1.SOURCE)").
-
-Example:
-  devices:
-    NFET:
-      independent: "gate_voltage"
-      gate_voltage: "V(X1.GATE,X1.SOURCE)"
-      drain_current: "I(VDRAIN)"
-      source_bulk_voltage: "V(X1.SOURCE,X1.BULK)"
-
-Activate in config:
-  analysis:
-    device: "NFET"
-
-Or per-run with the --device flag:
-  discont-finder data.csv --device NFET
-
-Adding a new device type requires only a YAML change — no code change.\
 """,
     "csv": """\
 CSV INPUT FORMAT
@@ -115,7 +76,7 @@ Rules:
     and special symbols (LTspice-style names are fully supported).
 
 Minimal example:
-  V(GATE),I(VDRAIN),V(SB)
+  gate_v,drain_i,vsb
   0.0,1.23e-9,0.0
   0.1,5.67e-9,0.0
   0.2,2.10e-8,0.5
@@ -130,35 +91,33 @@ Reading from stdin:
     "plots": """\
 PLOTS FORMAT
 ============
-Plotting is ONLY supported for DC sweep data.
-
 Plots are generated when either:
   - The -p/--plot flag is passed, OR
   - The plots section is present in the config file.
 
-When -p is used without a plots config section, default formatting is applied.
+All plots land in <output_dir>/PLOTS/.
 
-Output files (four per analyzed field):
-  iv_full.jpg     I_D vs V_GS (full sweep)
-  iv_zoom.jpg     I_D vs V_GS (zoomed to discontinuity regions)
-  fda2_full.jpg   d2I_D/dV_GS2 (full sweep)
-  fda2_zoom.jpg   d2I_D/dV_GS2 (zoomed)
+Output files (up to four per analyzed column):
+  <col>_full.jpg      y vs x (full sweep)
+  <col>_zoom.jpg      y vs x (zoomed to discontinuity regions)
+  <col>_fda2_full.jpg d²y/dx² (full sweep)
+  <col>_fda2_zoom.jpg d²y/dx² (zoomed)
 
 plots keys and types:
-  output_dir        string          Output directory. Default: <output_dir>/plots/
+  output_dir        string          Output directory. Default: <io.output_dir>/PLOTS/
   figsize           [float, float]  Figure size in inches. Default: [16.0, 9.0]
   dpi               int             Resolution. Default: 200
-  ids_ylabel        string          Y-axis label. Default: "$I_D$"
-  ids_unit_scale    float           Scale factor on current values. Default: 1.0
-  vgs_xlabel        string          X-axis label. Default: "$V_{GS}$ (V)"
-  vgs_xlim          [float, float]  X-axis limits. Default: auto
-  vgs_tick_step     float           X-axis tick spacing. Default: auto
+  ylabel            string          Y-axis label. Default: column name
+  unit_scale        float           Scale factor on y values. Default: 1.0
+  xlabel            string          X-axis label. Default: independent column name
+  xlim              [float, float]  X-axis limits. Default: auto
+  tick_step         float           X-axis tick spacing. Default: auto
   zoom_padding      float           Fractional padding around zoom windows. Default: 0.05
   zoom_merge_within float           Merge zoom windows within this x-distance. Default: 0.02
   title_prefix      string          Prefix for all plot titles. Default: ""
 
 plots.grouping keys (family-of-curves):
-  field           string  Semantic field from devices.<NAME> used to group curves.
+  column          string  CSV column name used to group curves.
   min             float   Exclude groups below this value.
   max             float   Exclude groups above this value.
   step            float   Only include groups at multiples of this interval from min.
@@ -170,24 +129,7 @@ plots.grouping keys (family-of-curves):
 
 
 def _load_config(path: Path | None = None) -> dict[str, Any]:
-    """Load YAML config from *path*, or the default user config path if None.
-
-    Parameters
-    ----------
-    path:
-        Explicit config file path. If None, defaults to
-        ``~/.config/spice_cli/config.yaml``.
-
-    Returns
-    -------
-    dict
-        Parsed YAML content, or ``{}`` if the default path does not exist.
-
-    Raises
-    ------
-    FileNotFoundError
-        If *path* was explicitly given but does not exist.
-    """
+    """Load YAML config from *path*, or the default user config path if None."""
     target = path if path is not None else _DEFAULT_CONFIG_PATH
     try:
         with target.open("r", encoding="utf-8") as handle:
@@ -205,11 +147,10 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="discont-finder",
         description=(
-            "Find discontinuities in numeric columns of a SPICE CSV output file.\n\n"
+            "Find discontinuities in numeric columns of a CSV file.\n\n"
             "INPUT FORMAT:\n"
             "  A standard CSV with a header row. Columns with float-parsable values\n"
-            "  are analyzed. Column names are matched exactly, including spaces and\n"
-            "  parentheses (LTspice-style names are supported).\n\n"
+            "  are analyzed. Column names are matched exactly.\n\n"
             "DETECTION:\n"
             "  Robust MAD-normalized curvature-jump with peak filtering.\n"
         ),
@@ -218,12 +159,11 @@ def _build_parser() -> argparse.ArgumentParser:
             "  discont-finder data.csv\n"
             "  discont-finder data.csv -s 30 --min-prominence 10\n"
             "  discont-finder data.csv -p\n"
-            "  discont-finder data.csv --device FET -p\n"
             "  discont-finder data.csv -c ~/myproject/config.yaml\n"
             "  cat data.csv | discont-finder -\n"
             "  discont-finder data.csv --inject -o faulted.csv --count 5 --seed 42\n\n"
             "Use --help-format <topic> for detailed format documentation.\n"
-            "Topics: config, device, csv, plots\n"
+            "Topics: config, csv, plots\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -232,7 +172,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--config",
         default=None,
         metavar="PATH",
-        help="Path to YAML config file (default: ~/.config/spice_cli/config.yaml).",
+        help="Path to YAML config file (default: ~/.config/discontinuity_finder/config.yaml).",
     )
     parser.add_argument(
         "--help-format",
@@ -258,7 +198,7 @@ def _build_parser() -> argparse.ArgumentParser:
         type=float,
         default=None,
         help=(
-            "Robust method only: minimum z-score prominence for a flagged peak "
+            "Minimum z-score prominence for a flagged peak "
             "(default 20.0; also from [detection].min_prominence)."
         ),
     )
@@ -267,22 +207,16 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         help=(
-            "Robust method only: minimum index gap between flagged peaks "
+            "Minimum index gap between flagged peaks "
             "(default 3; also from [detection].min_separation)."
         ),
-    )
-    parser.add_argument(
-        "--device",
-        default=None,
-        help="Override the active device name (otherwise uses [analysis].device from config).",
     )
     parser.add_argument(
         "-p",
         "--plot",
         action="store_true",
         help=(
-            "Render IV-curve plots. Only valid for DC sweep data with an active device. "
-            "Uses [plots] config if present; otherwise uses default formatting."
+            "Render plots. Uses [plots] config if present; otherwise uses default formatting."
         ),
     )
     parser.add_argument(
@@ -331,23 +265,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _load_numeric_columns_from_stream(stream: TextIO) -> dict[str, list[float]]:
-    """Parse numeric columns from a CSV stream.
-
-    Parameters
-    ----------
-    stream:
-        Readable text stream positioned at the start of a CSV file.
-
-    Returns
-    -------
-    dict
-        Mapping of column name to list of float values for all numeric columns.
-
-    Raises
-    ------
-    ValueError
-        If the stream has no header row or contains no numeric data.
-    """
+    """Parse numeric columns from a CSV stream."""
     reader = csv.DictReader(stream)
     if not reader.fieldnames:
         raise ValueError("CSV input has no header row.")
@@ -378,20 +296,7 @@ def _safe_filename(name: str) -> str:
 
 
 def _resolve_output_dir(config: dict[str, Any]) -> Path:
-    """Return the base output directory from config, or the default.
-
-    Reads ``[io].output_dir``; falls back to ``./spice_cli_output``.
-
-    Parameters
-    ----------
-    config:
-        Parsed YAML config dict.
-
-    Returns
-    -------
-    Path
-        Resolved output directory (not yet created).
-    """
+    """Return the base output directory from config, or the default."""
     raw = (config.get("io") or {}).get("output_dir")
     if raw:
         return Path(raw).expanduser()
@@ -399,7 +304,7 @@ def _resolve_output_dir(config: dict[str, Any]) -> Path:
 
 
 def _write_results_csv(
-    detections: dict[str, Any],
+    detections: dict[str, dict[float | None, tuple[DetectionResult, np.ndarray, np.ndarray, np.ndarray]]],
     output_dir: Path,
     filename: str = "results.csv",
     group_field: str | None = None,
@@ -408,14 +313,21 @@ def _write_results_csv(
 ) -> Path:
     """Write detection results to a CSV file.
 
-    Handles both device-mode results
-    ``{semantic: {group: (DetectionResult, x_arr, y_arr, row_idxs)}}``
-    and generic-mode results
-    ``{column_name: (DetectionResult, x_arr, y_arr, row_idxs)}``.
+    Parameters
+    ----------
+    detections:
+        ``{column_name: {group_value_or_None: (DetectionResult, x_arr, y_arr, row_idxs)}}``.
+    output_dir:
+        Directory to write into (created if needed).
+    filename:
+        Output file name. Default ``"results.csv"``.
+    group_field:
+        CSV column name used for grouping, or ``None`` for ungrouped.
 
-    When ``per_file_results`` is provided it is used instead of ``detections``
-    and ``input_filename``; each entry is ``(source_filename, detections_dict)``
-    so each row carries the correct source file name.
+    Returns
+    -------
+    Path
+        Absolute path of the written CSV file.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
     out_path = output_dir / filename
@@ -496,29 +408,7 @@ def _resolve_detection_params(
     min_separation: int | None,
     detection_cfg: dict[str, Any],
 ) -> dict[str, Any]:
-    """Translate CLI/config values into kwargs for ``find.detect``.
-
-    Parameters
-    ----------
-    sensitivity:
-        Robust sigma multiplier.
-    min_prominence:
-        Robust only: minimum peak prominence.
-    min_separation:
-        Robust only: minimum index gap between flagged peaks.
-    detection_cfg:
-        ``config["detection"]`` dict for config-level fallbacks.
-
-    Returns
-    -------
-    dict
-        Keyword arguments to pass to ``find.detect``.
-
-    Raises
-    ------
-    ValueError
-        If sensitivity is not positive.
-    """
+    """Translate CLI/config values into kwargs for ``find.detect``."""
     sigma = sensitivity if sensitivity is not None else detection_cfg.get("sigma")
     if sigma is None:
         sigma = 50.0
@@ -585,86 +475,14 @@ def _group_rows(
     return out
 
 
-def _analyze_device(
-    columns: dict[str, list[float]],
-    device: Device,
-    method_params: dict[str, Any],
-    grouping_col: str | None,
-    error_stream: TextIO,
-) -> dict[str, dict[float | None, tuple[DetectionResult, np.ndarray, np.ndarray, np.ndarray]]]:
-    """Run robust detection per dependent field and per group.
-
-    Parameters
-    ----------
-    columns:
-        All numeric columns loaded from CSV.
-    device:
-        Active device providing field → column mappings.
-    method_params:
-        Keyword arguments for ``find.detect``.
-    grouping_col:
-        CSV column name to partition rows by before detection, or ``None``
-        for no grouping.  Comes from ``analysis.group_by`` in config.
-    error_stream:
-        Stream for warning messages.
-
-    Returns
-    -------
-    dict
-        ``{semantic_field: {group_value: (DetectionResult, x_arr, y_arr, row_idxs)}}``.
-    """
-    if device.independent_column not in columns:
-        return {}
-
-    results: dict[str, dict[float | None, tuple[DetectionResult, np.ndarray, np.ndarray, np.ndarray]]] = {}
-    for semantic, csv_name in device.dependent_items():
-        if csv_name == grouping_col or semantic == device.independent:
-            continue
-        if csv_name not in columns:
-            continue
-        try:
-            groups = _group_rows(
-                columns, device.independent_column, csv_name, grouping_col
-            )
-        except (KeyError, ValueError) as exc:
-            print(
-                f"warning: could not group {device.name}.{semantic}: {exc}",
-                file=error_stream,
-            )
-            continue
-
-        per_group: dict[float | None, tuple[DetectionResult, np.ndarray, np.ndarray, np.ndarray]] = {}
-        has_variation = False
-        mirrors_independent = True
-        for group_value, (x_arr, y_arr, row_idxs) in groups.items():
-            if x_arr.size < 4:
-                continue
-            y_range = float(np.ptp(y_arr))
-            y_scale = max(abs(float(np.mean(y_arr))), 1.0)
-            if y_range / y_scale > 1e-9:
-                has_variation = True
-            if mirrors_independent and not np.allclose(x_arr, y_arr, rtol=1e-9, atol=1e-12):
-                mirrors_independent = False
-            try:
-                per_group[group_value] = (find_detect(x_arr, y_arr, **method_params), x_arr, y_arr, row_idxs)
-            except ValueError as exc:
-                print(
-                    f"warning: {device.name}.{semantic} "
-                    f"group={group_value}: {exc}",
-                    file=error_stream,
-                )
-        if per_group and has_variation and not mirrors_independent:
-            results[semantic] = per_group
-    return results
-
-
 def _generic_column_summary(
     columns: dict[str, list[float]],
     method_params: dict[str, Any],
     error_stream: TextIO,
     independent_col: str | None = None,
-) -> dict[str, tuple[DetectionResult, np.ndarray, np.ndarray, np.ndarray]]:
-    """Run detection on every numeric column vs row index (no device config).
+    group_by_col: str | None = None,
+) -> dict[str, dict[float | None, tuple[DetectionResult, np.ndarray, np.ndarray, np.ndarray]]]:
+    """Run detection on every numeric column, with optional x-axis and grouping.
 
     Parameters
     ----------
@@ -675,66 +493,96 @@ def _generic_column_summary(
     error_stream:
         Stream for warning messages.
     independent_col:
-        Optional CSV column name to use as the x-axis. When set and present,
-        that column is used as x for all other columns and skipped as a y-series.
-        When absent or not in columns, row index is used as x (existing behavior).
+        CSV column to use as x-axis. When set, that column is skipped as a
+        y-series and used as x for all others.  When absent, row index is used.
+    group_by_col:
+        CSV column to partition rows by before running detection. Requires
+        ``independent_col`` to be set and present in the data.
 
     Returns
     -------
     dict
-        ``{column_name: (DetectionResult, x_arr, y_arr, row_idxs)}``.
+        ``{column_name: {group_value_or_None: (DetectionResult, x_arr, y_arr, row_idxs)}}``.
     """
     x_override: np.ndarray | None = None
     if independent_col and independent_col in columns:
         x_override = np.asarray(columns[independent_col], dtype=float)
 
-    results: dict[str, tuple[DetectionResult, np.ndarray, np.ndarray, np.ndarray]] = {}
+    use_grouping = (
+        group_by_col is not None
+        and group_by_col in columns
+        and independent_col is not None
+        and independent_col in columns
+    )
+
+    results: dict[str, dict[float | None, tuple[DetectionResult, np.ndarray, np.ndarray, np.ndarray]]] = {}
+
     for name, values in columns.items():
-        if independent_col and name == independent_col:
+        if name == independent_col or name == group_by_col:
             continue
         if len(values) < 4:
             continue
-        y = np.asarray(values, dtype=float)
-        x = x_override if x_override is not None else np.arange(y.size, dtype=float)
-        try:
+
+        if use_grouping:
+            assert independent_col is not None
+            try:
+                groups = _group_rows(columns, independent_col, name, group_by_col)
+            except (KeyError, ValueError) as exc:
+                print(f"warning: could not group column {name!r}: {exc}", file=error_stream)
+                continue
+        else:
+            y = np.asarray(values, dtype=float)
+            x = x_override if x_override is not None else np.arange(y.size, dtype=float)
             row_idxs = np.arange(len(y), dtype=int)
-            results[name] = (find_detect(x, y, **method_params), x, y, row_idxs)
-        except ValueError as exc:
-            print(f"warning: column {name!r}: {exc}", file=error_stream)
+            groups = {None: (x, y, row_idxs)}
+
+        per_group: dict[float | None, tuple[DetectionResult, np.ndarray, np.ndarray, np.ndarray]] = {}
+        has_variation = False
+        mirrors_independent = True
+
+        for group_value, (x_arr, y_arr, row_idxs) in groups.items():
+            if x_arr.size < 4:
+                continue
+            y_range = float(np.ptp(y_arr))
+            y_scale = max(abs(float(np.mean(y_arr))), 1.0)
+            if y_range / y_scale > 1e-9:
+                has_variation = True
+            if mirrors_independent and not np.allclose(x_arr, y_arr, rtol=1e-9, atol=1e-12):
+                mirrors_independent = False
+            try:
+                per_group[group_value] = (
+                    find_detect(x_arr, y_arr, **method_params),
+                    x_arr,
+                    y_arr,
+                    row_idxs,
+                )
+            except ValueError as exc:
+                print(f"warning: column {name!r} group={group_value}: {exc}", file=error_stream)
+
+        if per_group and has_variation and not mirrors_independent:
+            results[name] = per_group
+
     return results
 
 
-def _write_device_summary(
-    device: Device,
+def _write_generic_summary(
     results: dict[str, dict[float | None, tuple[DetectionResult, np.ndarray, np.ndarray, np.ndarray]]],
     output: TextIO,
 ) -> int:
-    """Print a per-field, per-group discontinuity summary for a device.
-
-    Parameters
-    ----------
-    device:
-        Active device.
-    results:
-        ``{semantic_field: {group_value: DetectionResult}}``.
-    output:
-        Stream to write the summary to.
-
-    Returns
-    -------
-    int
-        Total number of discontinuities found across all fields and groups.
-    """
-    total = 0
-    field_count = len(results)
-    print(
-        f"Analyzed device {device.name!r} over {field_count} dependent field(s).",
-        file=output,
+    """Print a per-column, per-group discontinuity summary."""
+    print(f"Analyzed {len(results)} numeric column(s).", file=output)
+    total = sum(
+        tup[0].indices.size
+        for per_group in results.values()
+        for tup in per_group.values()
     )
-    for semantic, per_group in results.items():
+    if total == 0:
+        print("No discontinuities found.", file=output)
+        return 0
+    print(f"Found {total} discontinuity/discontinuities.", file=output)
+    for name, per_group in results.items():
         field_total = sum(tup[0].indices.size for tup in per_group.values())
-        total += field_total
-        print(f"{device.name}.{semantic}: {field_total}", file=output)
+        print(f"{name}: {field_total}", file=output)
         for group_value, (result, _, _, _) in sorted(
             per_group.items(), key=lambda kv: (kv[0] is None, kv[0] or 0.0)
         ):
@@ -748,128 +596,66 @@ def _write_device_summary(
                 f"(method={result.method}, thr={result.threshold:.3g})",
                 file=output,
             )
-    if total == 0:
-        print("No discontinuities found.", file=output)
-    else:
-        print(f"Found {total} discontinuity/discontinuities total.", file=output)
     return total
 
 
-def _write_generic_summary(
-    results: dict[str, tuple[DetectionResult, np.ndarray, np.ndarray, np.ndarray]],
-    output: TextIO,
-) -> int:
-    """Print a per-column discontinuity summary (no device).
-
-    Parameters
-    ----------
-    results:
-        ``{column_name: DetectionResult}``.
-    output:
-        Stream to write the summary to.
-
-    Returns
-    -------
-    int
-        Total number of discontinuities found.
-    """
-    print(f"Analyzed {len(results)} numeric column(s).", file=output)
-    total = sum(tup[0].indices.size for tup in results.values())
-    if total == 0:
-        print("No discontinuities found.", file=output)
-        return 0
-    print(f"Found {total} discontinuity/discontinuities.", file=output)
-    for name, (result, _, _, _) in results.items():
-        print(f"{name}: {result.indices.size}", file=output)
-        for idx in result.indices:
-            if idx < result.x.size:
-                x_val = result.x[idx]
-            else:
-                x_val = float(idx)
-            score_val = result.score[idx] if idx < result.score.size else float("nan")
-            print(
-                f"  index={int(idx)} x={x_val:.6g} score={score_val:.6g}",
-                file=output,
-            )
-    return total
-
-
-def _render_plots(
-    columns: dict[str, list[float]],
-    device: Device,
-    detections_by_field: dict[str, dict[float | None, DetectionResult]],
+def _render_generic_plots(
+    results: dict[str, dict[float | None, tuple[DetectionResult, np.ndarray, np.ndarray, np.ndarray]]],
+    independent_col: str | None,
     plot_config,
     output_stream: TextIO,
     error_stream: TextIO,
 ) -> None:
-    """Render the four focused plots for each analyzed dependent field.
+    """Render plots for each analyzed column into ``<output_dir>/PLOTS/``."""
+    from .plot import render_plots, filter_groups
+    from dataclasses import replace
 
-    Parameters
-    ----------
-    columns:
-        All numeric columns loaded from CSV.
-    device:
-        Active device providing field → column mappings.
-    detections_by_field:
-        ``{semantic_field: {group_value: DetectionResult}}``.
-    plot_config:
-        Populated ``PlotConfig`` instance.
-    output_stream:
-        Stream for progress messages.
-    error_stream:
-        Stream for warning messages.
-    """
-    from .plot import render_iv_plots
-
-    if not detections_by_field:
+    if not results:
         return
 
-    grouping_col = plot_config.grouping_column
-    independent_col = device.independent_column
-    base_output = plot_config.output_dir
-
     total_written = 0
-    for semantic, per_group in detections_by_field.items():
-        csv_name = device.fields.get(semantic)
-        if csv_name is None or csv_name not in columns:
-            continue
-        groups = _group_rows(columns, independent_col, csv_name, grouping_col)
+    for col_name, per_group in results.items():
+        groups_xy: dict[float | None, tuple[np.ndarray, np.ndarray]] = {}
+        dets: dict[float | None, DetectionResult] = {}
+        for gv, (result, x, y, _) in per_group.items():
+            groups_xy[gv] = (x, y)
+            dets[gv] = result
 
-        selected: list[float] = []
-        if grouping_col:
-            numeric_keys = [k for k in groups if k is not None]
-            selected = _filter_group_values(numeric_keys, plot_config)
+        if plot_config.grouping_column:
+            numeric_keys = [k for k in groups_xy if k is not None]
+            selected: list[float | None] = filter_groups(numeric_keys, plot_config)  # type: ignore[assignment]
+            if None in groups_xy and not numeric_keys:
+                selected = [None]
         else:
-            selected = [None] if None in groups else []  # type: ignore[list-item]
+            selected = list(groups_xy)
 
-        groups_to_plot = {k: groups[k][:2] for k in selected if k in groups}
-        dets_to_plot = {k: per_group[k][0] for k in selected if k in per_group}
+        groups_to_plot = {k: groups_xy[k] for k in selected if k in groups_xy}
+        dets_to_plot = {k: dets[k] for k in selected if k in dets}
         if not groups_to_plot:
             continue
 
-        field_config = _with_output_dir(
-            plot_config, base_output / _safe_filename(f"{device.name}_{semantic}")
+        field_config = replace(
+            plot_config,
+            xlabel=plot_config.xlabel or (independent_col or "index"),
+            ylabel=plot_config.ylabel or col_name,
         )
-        written = render_iv_plots(groups_to_plot, dets_to_plot, config=field_config)
-        total_written += len(written)
+        try:
+            written = render_plots(
+                groups_to_plot,
+                dets_to_plot,
+                col_name=col_name,
+                config=field_config,
+                x_col_name=independent_col or "",
+            )
+            total_written += len(written)
+        except Exception as exc:
+            print(f"warning: plotting {col_name!r} failed: {exc}", file=error_stream)
 
     if total_written:
         print(
-            f"Saved {total_written} plot(s) under {base_output}/",
+            f"Saved {total_written} plot(s) under {plot_config.output_dir}/",
             file=output_stream,
         )
-
-
-def _filter_group_values(values: list[float], plot_config) -> list[float]:
-    from .plot import filter_groups
-
-    return filter_groups(values, plot_config)
-
-
-def _with_output_dir(plot_config, new_dir: Path):
-    from dataclasses import replace
-
-    return replace(plot_config, output_dir=new_dir)
 
 
 def _open_input(
@@ -1033,11 +819,6 @@ def main(
     -------
     int
         Exit code: 0 on success, 2 on usage or configuration error.
-
-    Side effects:
-        Always writes a ``results.csv`` to the output directory.
-        Writes four JPEG plots per field when ``-p`` is given or ``[plots]``
-        is present in config.
     """
     parser = _build_parser()
     args = parser.parse_args(argv)

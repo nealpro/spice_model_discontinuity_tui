@@ -1,6 +1,3 @@
-general:
-  log_level: "info"
-
 io:
   # output_dir: base directory for results.csv and all generated files.
   # Default when unset: spice_cli_output/ under the current working directory.
@@ -16,32 +13,23 @@ detection:
   min_separation: 3
 
 analysis:
-  device: "FET"
-
-devices:
-  FET:
-    independent: "gate_voltage"
-    sweep: "X"
-    bulk_voltage: "VBULK"
-    temperature: "TEMPERATURE"
-    gate_voltage: "V(X1.GATE,X1.SOURCE)"
-    drain_current: "I(VDRAIN)"
-    source_bulk_voltage: "V(X1.SOURCE,X1.BULK)"
+  independent_col: "V(X1.GATE,X1.SOURCE)"  # CSV column used as the x-axis
+  group_by: "V(X1.SOURCE,X1.BULK)"          # CSV column to partition rows before detection
 
 plots:
   figsize: [16, 12]
   dpi: 180
-  ids_ylabel: "$I_D$ (µA)"
-  ids_unit_scale: 1.0e6
-  vgs_xlabel: "$V_{GS}$ (V)"
-  vgs_xlim: [0.0, 1.8]
-  vgs_tick_step: 0.2
+  ylabel: "$I_D$ (µA)"
+  unit_scale: 1.0e6
+  xlabel: "$V_{GS}$ (V)"
+  xlim: [0.0, 1.8]
+  tick_step: 0.2
   zoom_padding: 0.05
   zoom_merge_within: 0.02
   title_prefix: "NFET"
   grouping:
-    # Family-of-curves axis. `field` is a semantic key from devices.<active>.
-    field: "source_bulk_voltage"
+    # Family-of-curves axis: `column` is the raw CSV column name used to group curves.
+    column: "V(X1.SOURCE,X1.BULK)"
     min: 0.0
     max: 1.5
     step: 0.1

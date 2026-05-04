@@ -408,7 +408,6 @@ def render_plots(
     safe = _safe_name(col_name)
     windows = _discontinuity_windows(detections, config)
     title_tag = f"{config.title_prefix} ".lstrip()
-    vgs_var = config.vgs_xlabel.removesuffix(" (V)")
 
     xlabel = config.xlabel or x_col_name or "x"
     ylabel = config.ylabel or col_name
@@ -431,28 +430,22 @@ def render_plots(
     written: list[Path] = []
 
     fig, ax = plt.subplots(figsize=config.figsize)
-    _plot_ids(ax, groups, detections, config, config.vgs_xlim, flag_markers=True)
-    written.append(_save(fig, ax, "iv_full.jpg", rf"$I_D$ vs {vgs_var} (full)"))
+    _plot_y(ax, groups, detections, config, config.xlim, xlabel, ylabel, flag_markers=True)
+    written.append(_save(fig, ax, f"{safe}_full.jpg", f"{col_name} (full)"))
 
     fig, ax = plt.subplots(figsize=config.figsize)
-    _plot_fda2(ax, detections, config, config.vgs_xlim, flag_markers=True)
-    written.append(
-        _save(fig, ax, "fda2_full.jpg", rf"$d^2 I_D/d{vgs_var}^2$ (full)")
-    )
+    _plot_fda2(ax, detections, config, config.xlim, xlabel, fda2_ylabel, flag_markers=True)
+    written.append(_save(fig, ax, f"{safe}_fda2_full.jpg", f"d²{col_name}/dx² (full)"))
 
     if windows:
         zoom_xlim = (windows[0][0], windows[-1][1])
 
         fig, ax = plt.subplots(figsize=config.figsize)
-        _plot_ids(ax, groups, detections, config, zoom_xlim, flag_markers=True)
-        written.append(
-            _save(fig, ax, "iv_zoom.jpg", rf"$I_D$ vs {vgs_var} (zoom)")
-        )
+        _plot_y(ax, groups, detections, config, zoom_xlim, xlabel, ylabel, flag_markers=True)
+        written.append(_save(fig, ax, f"{safe}_zoom.jpg", f"{col_name} (zoom)"))
 
         fig, ax = plt.subplots(figsize=config.figsize)
-        _plot_fda2(ax, detections, config, zoom_xlim, flag_markers=True)
-        written.append(
-            _save(fig, ax, "fda2_zoom.jpg", rf"$d^2 I_D/d{vgs_var}^2$ (zoom)")
-        )
+        _plot_fda2(ax, detections, config, zoom_xlim, xlabel, fda2_ylabel, flag_markers=True)
+        written.append(_save(fig, ax, f"{safe}_fda2_zoom.jpg", f"d²{col_name}/dx² (zoom)"))
 
     return written

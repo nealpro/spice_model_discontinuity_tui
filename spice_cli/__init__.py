@@ -858,24 +858,10 @@ def main(
         print(f"error: {exc}", file=error_stream)
         return 2
 
-    try:
-        device = active_device(config, override=args.device)
-    except (KeyError, ValueError) as exc:
-        print(f"error: {exc}", file=error_stream)
-        return 2
-
     base_output_dir = _resolve_output_dir(config)
-
-    group_by_semantic = config.get("analysis", {}).get("group_by") if device else None
-    grouping_col: str | None = None
-    if device and group_by_semantic:
-        grouping_col = device.fields.get(group_by_semantic)
-        if grouping_col is None:
-            print(
-                f"warning: analysis.group_by '{group_by_semantic}' "
-                f"not found in device '{device.name}'",
-                file=error_stream,
-            )
+    analysis_cfg = config.get("analysis") or {}
+    independent_col = analysis_cfg.get("independent_col")
+    group_by_col = analysis_cfg.get("group_by")
 
     input_path = args.input
     resolved_filename = ""
@@ -916,100 +902,65 @@ def main(
         print(f"error: {exc}", file=error_stream)
         return 2
 
-    use_device = (
-        device is not None
-        and device.independent_column in columns
-        and any(v in columns for _, v in device.dependent_items())
-    )
-
     try:
-        if use_device:
-            from .plot import load_plot_config
-
-            want_plots = args.plot or ("plots" in config)
-            plot_config = None
-            if want_plots:
+        if len(resolved_paths) > 1:
+            per_file_results: list[tuple[str, dict]] = []
+            results: dict = {}
+            for csv_path in resolved_paths:
                 try:
-                    plot_config = load_plot_config(
-                        config, device, fallback_output_dir=base_output_dir
-                    )
-                except ValueError as exc:
-                    print(f"warning: plotting disabled: {exc}", file=error_stream)
-
-            if len(resolved_paths) > 1:
-                per_file_results: list[tuple[str, dict]] = []
-                detections: dict = {}
-                plot_columns = columns
-                for csv_path in resolved_paths:
-                    try:
-                        with csv_path.open(encoding="utf-8", newline="") as handle:
-                            file_cols = _load_numeric_columns_from_stream(handle)
-                    except (OSError, ValueError) as exc:
-                        print(f"warning: skipping {csv_path.name}: {exc}", file=error_stream)
-                        continue
-                    file_det = _analyze_device(
-                        file_cols, device, method_params, grouping_col, error_stream
-                    )
-                    if file_det:
-                        per_file_results.append((csv_path.name, file_det))
-                        plot_columns = file_cols
-                        for semantic, per_group in file_det.items():
-                            if semantic not in detections:
-                                detections[semantic] = {}
-                            detections[semantic].update(per_group)
-            else:
-                per_file_results = []
-                detections = _analyze_device(
-                    columns, device, method_params, grouping_col, error_stream
-                )
-                plot_columns = columns
-
-            _write_device_summary(device, detections, output_stream)
-
-            write_kwargs: dict = {"group_field": group_by_semantic}
-            if per_file_results:
-                write_kwargs["per_file_results"] = per_file_results
-            else:
-                write_kwargs["input_filename"] = resolved_filename
-            csv_path = _write_results_csv(detections, base_output_dir, **write_kwargs)
-            print(f"Results written to {csv_path}", file=output_stream)
-
-            if plot_config is not None and detections:
-                _render_plots(
-                    plot_columns, device, detections, plot_config, output_stream, error_stream
-                )
-        else:
-            independent_col = config.get("analysis", {}).get("independent_col")
-            if len(resolved_paths) > 1:
-                generic_per_file: list[tuple[str, dict]] = []
-                results: dict = {}
-                for csv_path in resolved_paths:
-                    try:
-                        with csv_path.open(encoding="utf-8", newline="") as handle:
-                            file_cols = _load_numeric_columns_from_stream(handle)
-                    except (OSError, ValueError) as exc:
-                        print(f"warning: skipping {csv_path.name}: {exc}", file=error_stream)
-                        continue
-                    file_res = _generic_column_summary(
-                        file_cols, method_params, error_stream,
-                        independent_col=independent_col,
-                    )
-                    if file_res:
-                        generic_per_file.append((csv_path.name, file_res))
-                        results.update(file_res)
-            else:
-                generic_per_file = []
-                results = _generic_column_summary(
-                    columns, method_params, error_stream,
+                    with csv_path.open(encoding="utf-8", newline="") as handle:
+                        file_cols = _load_numeric_columns_from_stream(handle)
+                except (OSError, ValueError) as exc:
+                    print(f"warning: skipping {csv_path.name}: {exc}", file=error_stream)
+                    continue
+                file_res = _generic_column_summary(
+                    file_cols, method_params, error_stream,
                     independent_col=independent_col,
+                    group_by_col=group_by_col,
                 )
-            _write_generic_summary(results, output_stream)
+                if file_res:
+                    per_file_results.append((csv_path.name, file_res))
+                    results.update(file_res)
+        else:
+            per_file_results = []
+            results = _generic_column_summary(
+                columns, method_params, error_stream,
+                independent_col=independent_col,
+                group_by_col=group_by_col,
+            )
 
-            if generic_per_file:
-                csv_path = _write_results_csv(results, base_output_dir, per_file_results=generic_per_file)
-            else:
-                csv_path = _write_results_csv(results, base_output_dir, input_filename=resolved_filename)
-            print(f"Results written to {csv_path}", file=output_stream)
+        _write_generic_summary(results, output_stream)
+
+        if per_file_results:
+            csv_path = _write_results_csv(
+                results, base_output_dir,
+                group_field=group_by_col,
+                per_file_results=per_file_results,
+            )
+        else:
+            csv_path = _write_results_csv(
+                results, base_output_dir,
+                group_field=group_by_col,
+                input_filename=resolved_filename,
+            )
+        print(f"Results written to {csv_path}", file=output_stream)
+
+        want_plots = args.plot or ("plots" in config)
+        if want_plots:
+            from .plot import load_plot_config
+            try:
+                plot_config = load_plot_config(
+                    config, fallback_output_dir=base_output_dir
+                )
+            except ValueError as exc:
+                print(f"warning: plotting disabled: {exc}", file=error_stream)
+                plot_config = None
+
+            if plot_config is not None and results:
+                _render_generic_plots(
+                    results, independent_col, plot_config, output_stream, error_stream
+                )
+
     except ValueError as exc:
         print(f"error: {exc}", file=error_stream)
         return 2

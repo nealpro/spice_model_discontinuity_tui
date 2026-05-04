@@ -449,3 +449,50 @@ def render_plots(
         written.append(_save(fig, ax, f"{safe}_fda2_zoom.jpg", f"d²{col_name}/dx² (zoom)"))
 
     return written
+
+
+def render_generic_plots(
+    results: dict,
+    output_dir: Path,
+    plots_config: dict,
+    source_filename: str = "",
+) -> list[Path]:
+    """Generate one signal plot per detected column in generic (no-device) mode."""
+    plt = _lazy_plt()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    dpi = int(plots_config.get("dpi", 150))
+    figsize_raw = plots_config.get("figsize", [10, 5])
+    figsize = tuple(figsize_raw[:2]) if len(figsize_raw) >= 2 else (10, 5)
+    xlabel = str(plots_config.get("xlabel", "Row index"))
+    written: list[Path] = []
+
+    for col_name, (result, x_arr, y_arr, row_idxs) in results.items():
+        fig, ax = plt.subplots(figsize=figsize)
+        ax.plot(x_arr, y_arr, color="steelblue", linewidth=1.2, label=col_name)
+
+        for idx in result.indices:
+            x_val = result.x[idx] if idx < result.x.size else float("nan")
+            closest = int(np.argmin(np.abs(x_arr - x_val)))
+            ax.axvline(x=x_arr[closest], color="red", linestyle="--", linewidth=1.0,
+                       label="discontinuity" if idx == result.indices[0] else None)
+
+        ax.set_xlabel(xlabel, fontsize=12)
+        ax.set_ylabel(col_name, fontsize=12)
+        safe_name = col_name.replace("/", "_").replace("(", "").replace(")", "").replace(" ", "_")
+        title = str(plots_config.get("title_prefix", "")).strip()
+        title = f"{title} {col_name}".strip()
+        if source_filename:
+            title = f"{title} - {source_filename}"
+        ax.set_title(title, fontsize=14)
+        handles, labels = ax.get_legend_handles_labels()
+        if handles:
+            ax.legend(handles, labels, fontsize=9)
+        fig.tight_layout()
+        file_stem = Path(source_filename).stem if source_filename else ""
+        out_name = f"{safe_name}_{file_stem}.jpg" if file_stem else f"{safe_name}.jpg"
+        out = output_dir / out_name
+        fig.savefig(out, dpi=dpi)
+        plt.close(fig)
+        written.append(out)
+
+    return written

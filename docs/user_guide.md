@@ -40,28 +40,9 @@ The tool prints a per-column discontinuity summary to stdout and always writes a
 
 ---
 
-## Detection Methods
+## Detection
 
-Select a method with `--method`. The default is `robust` (configurable).
-
-### Simple (`--method simple`)
-
-Flags consecutive samples whose absolute difference exceeds a threshold:
-
-```
-|y_i − y_{i−1}| ≥ T
-```
-
-Set `T` with `-s`/`--sensitivity`. Best for clean, uniformly-scaled data with no noise.
-
-### Higher-Order (`--method higher_order`)
-
-Flags points where the relative jump in the second finite-difference derivative exceeds a
-threshold. More noise-tolerant than `simple`, but still requires explicit threshold tuning.
-
-### Robust (`--method robust`) — recommended
-
-Treats discontinuities as statistical outliers in a normalized curvature-jump signal.
+`discont-finder` uses a robust MAD-normalized curvature-jump detector.
 
 Given sorted samples $(x_i, y_i)$:
 
@@ -69,12 +50,9 @@ Given sorted samples $(x_i, y_i)$:
 2. Compute second differences: `f2_i` on midpoint grid
 3. Compute curvature-jump signal: `j_i = (f2_{i+1} − f2_i) / Δx_mid`
 4. Normalize: `s_i = |j_i| / (1.4826 × MAD(j))`
-5. Flag peaks in `s_i` satisfying three constraints (height, prominence, separation)
+5. Flag peaks in `s_i` satisfying height, prominence, and separation constraints
 
-The MAD normalization makes the score scale-invariant across different devices and
-operating conditions.
-
-**Robust-specific flags:**
+**Detector flags:**
 
 | Flag | Default | Meaning |
 |---|---|---|
@@ -90,20 +68,19 @@ the baseline.
 
 ## CLI Flags Reference
 
-```
+```text
 usage: discont-finder [options] [input]
 
 positional:
   input                     CSV file path, or '-' for stdin
 
 config:
-  -c, --config PATH         TOML config file (default: ~/.config/spice_cli/config.toml)
+  -c, --config PATH         YAML config file (default: ~/.config/spice_cli/config.yaml)
   --help-format TOPIC       Print format docs for TOPIC and exit
                             Topics: config, device, csv, plots
 
 detection:
-  --method {simple,higher_order,robust}
-  -s, --sensitivity FLOAT   Threshold (simple/higher_order) or sigma (robust)
+  -s, --sensitivity FLOAT   Robust sigma threshold (MAD z-score multiplier)
   --min-prominence FLOAT    Robust: minimum peak prominence
   --min-separation INT      Robust: minimum index spacing between peaks
 
@@ -133,14 +110,15 @@ Without a device, the CLI analyzes all numeric columns against the row index.
 
 ### Defining a Device
 
-In `~/.config/spice_cli/config.toml`:
+In `~/.config/spice_cli/config.yaml`:
 
-```toml
-[devices.FET]
-independent = "gate_voltage"
-gate_voltage        = "V(X1.GATE,X1.SOURCE)"
-drain_current       = "I(VDRAIN)"
-source_bulk_voltage = "V(X1.SOURCE,X1.BULK)"
+```yaml
+devices:
+  FET:
+    independent: "gate_voltage"
+    gate_voltage: "V(X1.GATE,X1.SOURCE)"
+    drain_current: "I(VDRAIN)"
+    source_bulk_voltage: "V(X1.SOURCE,X1.BULK)"
 ```
 
 The `independent` key names the field used as the x-axis. All other fields are treated as
@@ -151,9 +129,9 @@ groups curves by its unique values for both analysis and plotting.
 
 In config:
 
-```toml
-[analysis]
-device = "FET"
+```yaml
+analysis:
+  device: "FET"
 ```
 
 Or via flag (overrides config):
@@ -162,36 +140,30 @@ Or via flag (overrides config):
 uv run discont-finder data.csv --device FET
 ```
 
-**With a device active, the CLI:**
-1. Resolves CSV columns through the device's field mappings
-2. Analyzes each dependent field vs the independent axis
-3. Groups results by the grouping column if one is configured under `[plots.grouping]`
-4. Always writes `results.csv` to the output directory
-5. Generates 4 JPEG plots per field if `-p` is passed or `[plots]` is in config (DC sweep only)
-
 ---
 
 ## Configuration Reference
 
-Config file: `~/.config/spice_cli/config.toml`  
-Override with: `discont-finder -c /path/to/config.toml`  
+Config file: `~/.config/spice_cli/config.yaml`  
+Override with: `discont-finder -c /path/to/config.yaml`  
 CLI flags override all config values.
 
-See **[docs/config_reference.md](config_reference.md)** for the full reference with all keys, types, and defaults.
+See **[docs/config_reference.md](config_reference.md)** for the full reference.
 
 A minimal working config:
 
-```toml
-[analysis]
-device = "FET"
+```yaml
+analysis:
+  device: "FET"
 
-[devices.FET]
-independent   = "gate_voltage"
-gate_voltage  = "V(X1.GATE,X1.SOURCE)"
-drain_current = "I(VDRAIN)"
+devices:
+  FET:
+    independent: "gate_voltage"
+    gate_voltage: "V(X1.GATE,X1.SOURCE)"
+    drain_current: "I(VDRAIN)"
 ```
 
-See `config_examples/config.toml` for a fully annotated example.
+See `config_examples/config.yaml` for a fully annotated example.
 
 ---
 
@@ -200,22 +172,20 @@ See `config_examples/config.toml` for a fully annotated example.
 ### Detect discontinuities in an IV sweep
 
 ```bash
-uv run discont-finder data.csv --method robust --sensitivity 30
+uv run discont-finder data.csv --sensitivity 30
 ```
-
-Lowering `--sensitivity` from the default of 50 catches subtler discontinuities.
 
 ### Analyze a FET sweep with plots
 
 > Plotting is only supported for DC sweep data.
 
-1. Configure device settings in `~/.config/spice_cli/config.toml`.
+1. Configure device settings in `~/.config/spice_cli/config.yaml`.
 2. Run with `-p` to enable plots:
    ```bash
    uv run discont-finder data.csv --device FET -p
    ```
-3. Review the stdout summary, `spice_cli_output/results.csv`, and the four JPEG
-   plots written to `spice_cli_output/plots/<device>_<field>/`.
+3. Review stdout, `spice_cli_output/results.csv`, and plots in
+   `spice_cli_output/plots/<device>_<field>/`.
 
 Plots are also generated automatically (without `-p`) when a `[plots]` section
 is present in config.
@@ -227,7 +197,7 @@ is present in config.
 uv run discont-finder clean.csv --inject -o faulted.csv --count 5 --magnitude 1e-4 --seed 42
 
 # Verify the detector finds them
-uv run discont-finder faulted.csv --method robust -s 20
+uv run discont-finder faulted.csv -s 20
 ```
 
 ### Pipeline usage
@@ -240,26 +210,6 @@ cat simulation_output.csv | uv run discont-finder - --device FET
 
 ## Output
 
-### Stdout summary (no device)
-
-```
-5 columns analyzed
-  V:  0 discontinuities
-  ID: 2 discontinuities at indices [142, 301]
-  ...
-Results written to spice_cli_output/results.csv
-```
-
-### Stdout summary (with device)
-
-```
-Device: FET
-3 fields analyzed
-  drain_current: 2 discontinuities
-  ...
-Results written to spice_cli_output/results.csv
-```
-
 ### Results CSV (`results.csv`)
 
 Always written to the output directory. One row per detected discontinuity.
@@ -271,8 +221,8 @@ Always written to the output directory. One row per detected discontinuity.
 | `index` | Index in the score array where the discontinuity was flagged |
 | `x_value` | Corresponding x-axis value |
 | `score` | Detection score at this index |
-| `threshold` | Threshold applied by the detection method |
-| `method` | Detection method used (`simple`, `higher_order`, or `robust`) |
+| `threshold` | Threshold applied by the detector |
+| `method` | Detection method used (always `robust`) |
 
 If no discontinuities are found, the file contains only the header row.
 
@@ -294,7 +244,6 @@ Generated with `-p` or when `[plots]` is in config. DC sweep only.
 **No discontinuities detected on data that has them:**
 - Lower `--sensitivity` (default 50 is conservative)
 - Try `--min-prominence 5` or `--min-separation 1`
-- Run `--method simple -s 0.001` to confirm data is loading correctly
 
 **Too many false positives:**
 - Increase `--sensitivity`
@@ -302,11 +251,7 @@ Generated with `-p` or when `[plots]` is in config. DC sweep only.
 - Confirm the data is sorted by the independent axis
 
 **Plots not generated:**
-- Pass `-p` flag, or add a `[plots]` section to config
+- Pass `-p`, or add a `[plots]` section to config
 - Plotting requires an active device (`[analysis].device` or `--device`)
 - Plotting is only supported for DC sweep data
 - CSV column names must exactly match the values in `[devices.<NAME>]` (case-sensitive)
-
-**Device fields not resolving:**
-- Run without `--device` first to see raw column names from the CSV
-- Compare column names against the values (not keys) in `[devices.<NAME>]`

@@ -35,7 +35,6 @@ cat path/to/data.csv | discont-finder -
 
 Useful flags:
 
-- `--method simple|higher_order|robust`
 - `-s/--sensitivity`
 - `--min-prominence`
 - `--min-separation`
@@ -43,8 +42,6 @@ Useful flags:
 
 Method details:
 
-- [`docs/SIMPLE.md`](docs/SIMPLE.md)
-- [`docs/HIGHER_ORDER.md`](docs/HIGHER_ORDER.md)
 - [`docs/ROBUST.md`](docs/ROBUST.md)
 - [`docs/robust_deep_dive.typ`](docs/robust_deep_dive.typ)
 
@@ -123,8 +120,7 @@ Default detector settings.
 
 | Key | Meaning |
 | --- | --- |
-| `method` | `simple`, `higher_order`, or `robust` (default) |
-| `sensitivity` | Raw threshold for `simple`/`higher_order`; sigma threshold for `robust` |
+| `sensitivity` | Robust sigma threshold (MAD z-score cutoff) |
 | `min_prominence` | Robust peak prominence cutoff |
 | `min_separation` | Robust minimum peak spacing |
 

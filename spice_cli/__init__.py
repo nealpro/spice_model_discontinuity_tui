@@ -17,10 +17,7 @@ from .devices import Device, active_device
 from spice_discontinuity.find import DetectionResult, detect as find_detect
 from spice_discontinuity.inject import inject_random_spikes
 
-_DEFAULT_CONFIG_PATH = Path("~/.config/spice_cli/config.yaml").expanduser()
-
-VALID_METHODS = ("simple", "higher_order", "robust")
-DEFAULT_METHOD = "robust"
+_DEFAULT_CONFIG_PATH = Path("~/.config/discontinuity_finder/config.yaml").expanduser()
 
 _HELP_FORMAT_TOPICS: dict[str, str] = {
     "config": """\
@@ -37,8 +34,7 @@ Sections recognized:
     files: ["data/nmos.csv"]         # fallback file(s) when stdin is a terminal
 
   detection:
-    method: "robust"                 # "simple" | "higher_order" | "robust"
-    sensitivity: 50.0               # threshold (simple/higher_order) or z-score sigma (robust)
+    sensitivity: 50.0               # robust z-score sigma threshold
     min_prominence: 20.0            # robust only: minimum peak prominence
     min_separation: 3               # robust only: minimum index gap between peaks
 
@@ -214,16 +210,13 @@ def _build_parser() -> argparse.ArgumentParser:
             "  A standard CSV with a header row. Columns with float-parsable values\n"
             "  are analyzed. Column names are matched exactly, including spaces and\n"
             "  parentheses (LTspice-style names are supported).\n\n"
-            "DETECTION METHODS:\n"
-            "  simple        Flag |y_i - y_{i-1}| >= T  (requires -s)\n"
-            "  higher_order  Flag derivative-ratio score >= T  (requires -s)\n"
-            "  robust        MAD-normalized curvature-jump, peak-filtered  (default)\n"
+            "DETECTION:\n"
+            "  Robust MAD-normalized curvature-jump with peak filtering.\n"
         ),
         epilog=(
             "EXAMPLES:\n"
             "  discont-finder data.csv\n"
-            "  discont-finder data.csv --method simple -s 1e-4\n"
-            "  discont-finder data.csv --method robust -s 30 --min-prominence 10\n"
+            "  discont-finder data.csv -s 30 --min-prominence 10\n"
             "  discont-finder data.csv -p\n"
             "  discont-finder data.csv --device FET -p\n"
             "  discont-finder data.csv -c ~/myproject/config.yaml\n"
@@ -256,16 +249,9 @@ def _build_parser() -> argparse.ArgumentParser:
         type=float,
         default=None,
         help=(
-            "For simple/higher_order: raw score threshold (> 0). "
-            "For robust: sigma multiplier on MAD (default 50). "
+            "Robust detector sigma multiplier on MAD (default 50). "
             "Falls back to [detection].sensitivity in config."
         ),
-    )
-    parser.add_argument(
-        "--method",
-        choices=VALID_METHODS,
-        default=None,
-        help=f"Detection method. Falls back to [detection].method (default: {DEFAULT_METHOD}).",
     )
     parser.add_argument(
         "--min-prominence",
@@ -509,8 +495,7 @@ def _write_results_csv(
     return out_path
 
 
-def _resolve_method_params(
-    method: str,
+def _resolve_detection_params(
     sensitivity: float | None,
     min_prominence: float | None,
     min_separation: int | None,
@@ -520,10 +505,8 @@ def _resolve_method_params(
 
     Parameters
     ----------
-    method:
-        One of ``"simple"``, ``"higher_order"``, or ``"robust"``.
     sensitivity:
-        Raw threshold (simple/higher_order) or sigma multiplier (robust).
+        Robust sigma multiplier.
     min_prominence:
         Robust only: minimum peak prominence.
     min_separation:
@@ -539,18 +522,8 @@ def _resolve_method_params(
     Raises
     ------
     ValueError
-        If ``method`` is simple/higher_order and no sensitivity is provided,
-        or if sensitivity is not positive.
+        If sensitivity is not positive.
     """
-    if method in {"simple", "higher_order"}:
-        if sensitivity is None:
-            raise ValueError(
-                f"method '{method}' requires -s/--sensitivity or [detection].sensitivity."
-            )
-        if sensitivity <= 0:
-            raise ValueError("-s/--sensitivity must be greater than 0.")
-        return {"threshold": float(sensitivity)}
-
     sigma = sensitivity if sensitivity is not None else detection_cfg.get("sigma")
     if sigma is None:
         sigma = 50.0
@@ -620,12 +593,11 @@ def _group_rows(
 def _analyze_device(
     columns: dict[str, list[float]],
     device: Device,
-    method: str,
     method_params: dict[str, Any],
     grouping_col: str | None,
     error_stream: TextIO,
 ) -> dict[str, dict[float | None, tuple[DetectionResult, np.ndarray, np.ndarray, np.ndarray]]]:
-    """Run method-dispatched detection per dependent field and per group.
+    """Run robust detection per dependent field and per group.
 
     Parameters
     ----------
@@ -633,8 +605,6 @@ def _analyze_device(
         All numeric columns loaded from CSV.
     device:
         Active device providing field → column mappings.
-    method:
-        Detection method name.
     method_params:
         Keyword arguments for ``find.detect``.
     grouping_col:
@@ -672,9 +642,7 @@ def _analyze_device(
         has_variation = False
         mirrors_independent = True
         for group_value, (x_arr, y_arr, row_idxs) in groups.items():
-            if x_arr.size < 4 and method == "robust":
-                continue
-            if x_arr.size < 2:
+            if x_arr.size < 4:
                 continue
             y_range = float(np.ptp(y_arr))
             y_scale = max(abs(float(np.mean(y_arr))), 1.0)
@@ -683,7 +651,7 @@ def _analyze_device(
             if mirrors_independent and not np.allclose(x_arr, y_arr, rtol=1e-9, atol=1e-12):
                 mirrors_independent = False
             try:
-                per_group[group_value] = (find_detect(method, x_arr, y_arr, **method_params), x_arr, y_arr, row_idxs)
+                per_group[group_value] = (find_detect(x_arr, y_arr, **method_params), x_arr, y_arr, row_idxs)
             except ValueError as exc:
                 print(
                     f"warning: {device.name}.{semantic} "
@@ -697,19 +665,16 @@ def _analyze_device(
 
 def _generic_column_summary(
     columns: dict[str, list[float]],
-    method: str,
     method_params: dict[str, Any],
     error_stream: TextIO,
     independent_col: str | None = None,
-) -> dict[str, DetectionResult]:
+) -> dict[str, tuple[DetectionResult, np.ndarray, np.ndarray, np.ndarray]]:
     """Run detection on every numeric column vs row index (no device config).
 
     Parameters
     ----------
     columns:
         Numeric columns from CSV.
-    method:
-        Detection method name.
     method_params:
         Keyword arguments for ``find.detect``.
     error_stream:
@@ -732,15 +697,13 @@ def _generic_column_summary(
     for name, values in columns.items():
         if independent_col and name == independent_col:
             continue
-        if len(values) < 2:
+        if len(values) < 4:
             continue
         y = np.asarray(values, dtype=float)
         x = x_override if x_override is not None else np.arange(y.size, dtype=float)
-        if method == "robust" and y.size < 4:
-            continue
         try:
             row_idxs = np.arange(len(y), dtype=int)
-            results[name] = (find_detect(method, x, y, **method_params), x, y, row_idxs)
+            results[name] = (find_detect(x, y, **method_params), x, y, row_idxs)
         except ValueError as exc:
             print(f"warning: column {name!r}: {exc}", file=error_stream)
     return results
@@ -748,7 +711,7 @@ def _generic_column_summary(
 
 def _write_device_summary(
     device: Device,
-    results: dict[str, dict[float | None, DetectionResult]],
+    results: dict[str, dict[float | None, tuple[DetectionResult, np.ndarray, np.ndarray, np.ndarray]]],
     output: TextIO,
 ) -> int:
     """Print a per-field, per-group discontinuity summary for a device.
@@ -798,7 +761,8 @@ def _write_device_summary(
 
 
 def _write_generic_summary(
-    results: dict[str, DetectionResult], output: TextIO
+    results: dict[str, tuple[DetectionResult, np.ndarray, np.ndarray, np.ndarray]],
+    output: TextIO,
 ) -> int:
     """Print a per-column discontinuity summary (no device).
 
@@ -1103,21 +1067,12 @@ def main(
 
     detection_cfg = config.get("detection") or {}
 
-    method = args.method or detection_cfg.get("method") or DEFAULT_METHOD
-    if method not in VALID_METHODS:
-        print(
-            f"error: unknown method {method!r} (expected {', '.join(VALID_METHODS)}).",
-            file=error_stream,
-        )
-        return 2
-
     sensitivity = args.sensitivity
     if sensitivity is None:
         sensitivity = detection_cfg.get("sensitivity")
 
     try:
-        method_params = _resolve_method_params(
-            method,
+        method_params = _resolve_detection_params(
             sensitivity,
             args.min_prominence,
             args.min_separation,
@@ -1191,7 +1146,7 @@ def main(
                     print(f"warning: plotting disabled: {exc}", file=error_stream)
 
             detections = _analyze_device(
-                columns, device, method, method_params, grouping_col, error_stream
+                columns, device, method_params, grouping_col, error_stream
             )
             _write_device_summary(device, detections, output_stream)
 
@@ -1205,7 +1160,7 @@ def main(
         else:
             independent_col = config.get("analysis", {}).get("independent_col")
             results = _generic_column_summary(
-                columns, method, method_params, error_stream,
+                columns, method_params, error_stream,
                 independent_col=independent_col,
             )
             _write_generic_summary(results, output_stream)

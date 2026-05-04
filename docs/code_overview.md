@@ -19,12 +19,10 @@ Pure library. Has no knowledge of the CLI, config files, or plotting.
 
 ### `find.py` — Detection algorithms
 
-Unified dispatch via `detect(method, x, y, **params)` → `DetectionResult`.
+Robust detector entry point: `detect(x, y, **params)` → `DetectionResult`.
 
 | Method | Algorithm | When to use |
 |---|---|---|
-| `simple` | `\|y_i − y_{i−1}\| ≥ T` | Clean, uniformly-scaled data |
-| `higher_order` | 2nd-derivative ratio score | Moderate noise tolerance |
 | `robust` ★ | MAD-normalized curvature-jump + peak filtering | Default; adapts to signal scale |
 
 **`DetectionResult` fields:**
@@ -120,7 +118,7 @@ User config: `~/.config/spice_cli/config.yaml`. Override with `-c`. CLI flags ov
 | Section | Purpose |
 |---|---|
 | `io` | Output directory and fallback input files |
-| `detection` | Default method, sensitivity, prominence, separation |
+| `detection` | Robust sensitivity, prominence, and separation |
 | `analysis` | Active device name |
 | `devices.<NAME>` | Semantic name → CSV column mappings |
 | `plots` | Figure dimensions, labels, zoom params (presence enables plotting) |
@@ -139,7 +137,7 @@ spice_model_discontinuity/
 ├── main.py                      Thin wrapper → spice_cli.main()
 ├── spice_discontinuity/         Core library (no CLI dependency)
 │   ├── __init__.py              Exports: find, generate, inject modules
-│   ├── find.py                  Three detection algorithms + dispatch
+│   ├── find.py                  Robust detector + scoring utilities
 │   ├── inject.py                Fault injection utilities
 │   └── generate.py              [Stub] Synthetic data generator
 ├── spice_cli/                   CLI tool
@@ -147,12 +145,10 @@ spice_model_discontinuity/
 │   ├── devices.py               Device field-mapping abstractions
 │   └── plot.py                  matplotlib IV curve rendering
 ├── docs/                        Algorithm and project documentation
-│   ├── SIMPLE.md                Simple detector math
-│   ├── HIGHER_ORDER.md          Higher-order derivative detector math
 │   └── ROBUST.md                Robust MAD-based detector math
 ├── config_examples/             Example YAML configurations
-│   ├── config.yaml              Full example (robust method)
-│   └── simple.yaml              Simple method example
+│   ├── config.yaml              Full robust example
+│   └── aggressive.yaml          Low-threshold robust example
 └── tests/
     ├── test_cli.py              Integration tests (4 cases)
     └── files/                   Test data
@@ -171,10 +167,9 @@ CSV (file or stdin) + CLI flags + config.yaml (-c or default)
     (--inject)       (fields)     (-p or [plots])
           │               │              │
     faulted CSV      find.detect()    4 JPEGs
-                    ┌────┼────┐
-                 simple h.o. robust★
-                         │
-                  DetectionResult
+                         robust★
+                            │
+                     DetectionResult
                     ┌────┴────┐
               stdout summary  results.csv
 ```

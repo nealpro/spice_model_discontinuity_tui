@@ -9,10 +9,8 @@ io:
     - "tests/files/simulation_data_sample.csv"
 
 detection:
-  # method: "simple" | "higher_order" | "robust"
-  #   - simple / higher_order: `sensitivity` is a raw score threshold (> 0).
-  #   - robust: `sensitivity` overrides the default σ multiplier on MAD (default 50.0).
-  method: "robust"
+  # Robust detector settings:
+  #   - `sensitivity` is the MAD-z-score sigma threshold (default 50.0).
   sensitivity: 5.0
   min_prominence: 20.0
   min_separation: 3

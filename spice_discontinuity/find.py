@@ -1,16 +1,6 @@
-"""Discontinuity-finding utilities for SPICE simulation data.
+"""Robust discontinuity-finding utilities for SPICE simulation data.
 
-Three detection methods are available:
-
-- ``"simple"`` — absolute delta exceeds a raw threshold (``find_discontinuities``).
-- ``"higher_order"`` — legacy second-derivative ratio score + raw threshold
-  (``detect_discontinuities_higher_order`` + ``get_discontinuity_indices``).
-- ``"robust"`` — scale-aware score with MAD-based threshold and peak
-  prominence filtering (``detect_robust``). Recommended default; treats
-  discontinuities as rare outliers and resists both flat-region score
-  blow-up and clustered false positives.
-
-Use ``detect(method, x, y, **params)`` to dispatch uniformly.
+This module only exposes the MAD-normalized robust detector.
 """
 
 import csv
@@ -25,26 +15,16 @@ _MAD_TO_SIGMA = 1.4826  # scale factor that makes MAD a consistent estimator of 
 
 
 @dataclass(frozen=True)
-class Discontinuity:
-    """Represents a detected discontinuity in a single numeric series."""
-
-    index: int
-    delta: float
-
-
-@dataclass(frozen=True)
 class DetectionResult:
-    """Structured output of the method-dispatching ``detect`` entry point.
+    """Structured output of the robust ``detect`` entry point.
 
     Attributes:
-        x: Independent axis aligned with ``score`` (length N-3 for the
-            higher-order family; same grid for ``simple``).
-        fda_2: Second derivative on the ``vgs_mid2`` grid (length N-2) for the
-            higher-order family; empty for ``simple``.
-        score: Per-point sensitivity score on the ``x`` grid.
+        x: Independent axis aligned with ``score`` (length N-3).
+        fda_2: Second derivative on the midpoint grid (length N-2).
+        score: Per-point robust sensitivity score on the ``x`` grid.
         indices: Indices into ``score`` / ``x`` that were flagged.
         threshold: Final numeric cutoff applied to the score.
-        method: ``"simple" | "higher_order" | "robust"``.
+        method: Always ``"robust"``.
     """
 
     x: np.ndarray
@@ -102,134 +82,6 @@ def load_csv_numeric_columns(path: str | Path) -> dict[str, list[float]]:
     return numeric_columns
 
 
-def find_discontinuities(values: list[float], threshold: float) -> list[Discontinuity]:
-    """Detect step discontinuities where adjacent delta exceeds threshold.
-
-    Flags index ``i`` when ``|values[i] - values[i-1]| >= threshold``.
-
-    Parameters
-    ----------
-    values:
-        Ordered numeric series to scan.
-    threshold:
-        Minimum absolute difference to flag. Must be positive.
-
-    Returns
-    -------
-    list[Discontinuity]
-        One entry per flagged transition, in ascending index order.
-
-    Raises
-    ------
-    ValueError
-        If ``threshold <= 0``.
-    """
-    if threshold <= 0:
-        raise ValueError("threshold must be positive.")
-    if len(values) < 2:
-        return []
-
-    discontinuities: list[Discontinuity] = []
-    for index in range(1, len(values)):
-        delta = values[index] - values[index - 1]
-        if abs(delta) >= threshold:
-            discontinuities.append(Discontinuity(index=index, delta=delta))
-    return discontinuities
-
-
-def analyze_csv_discontinuities(
-    path: str | Path, threshold: float = 1.0
-) -> dict[str, list[Discontinuity]]:
-    """Analyze all numeric CSV columns for discontinuities.
-
-    Delegates to ``load_csv_numeric_columns`` then ``find_discontinuities``.
-
-    Parameters
-    ----------
-    path:
-        Path to a CSV file with a header row.
-    threshold:
-        Absolute delta threshold passed to ``find_discontinuities``.
-
-    Returns
-    -------
-    dict
-        ``{column_name: [Discontinuity, ...]}`` for every numeric column.
-    """
-    columns = load_csv_numeric_columns(path)
-    return {
-        column_name: find_discontinuities(values, threshold)
-        for column_name, values in columns.items()
-    }
-
-
-def detect_discontinuities_higher_order(
-    vgs: np.ndarray,
-    ids: np.ndarray,
-    threshold: float | None = None,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Compute a higher-order discontinuity score from SPICE V/I data.
-
-    Builds three progressively shorter grids:
-    - ``fda_1`` (length N-1) — first finite difference on ``vgs`` grid
-    - ``fda_2`` (length N-2) — second finite difference on ``vgs_mid1`` grid
-    - ``final_score`` (length N-3) — relative jump in ``fda_2``, normalized by Δx
-
-    Parameters
-    ----------
-    vgs:
-        Gate voltage array (independent axis), length N.
-    ids:
-        Drain current array (dependent axis), length N.
-    threshold:
-        Accepted for API symmetry; not applied here. Use
-        ``get_discontinuity_indices`` to threshold the returned score.
-
-    Returns
-    -------
-    tuple
-        ``(vgs_mid3, fda_2, final_score)`` with shapes
-        ``(N-3,)``, ``(N-2,)``, ``(N-3,)``.
-    """
-    vgs = np.asarray(vgs, dtype=float)
-    ids = np.asarray(ids, dtype=float)
-
-    fda_1 = np.diff(ids) / np.diff(vgs)
-    vgs_mid1 = (vgs[:-1] + vgs[1:]) / 2.0
-
-    fda_2 = np.diff(fda_1) / np.diff(vgs_mid1)
-    vgs_mid2 = (vgs_mid1[:-1] + vgs_mid1[1:]) / 2.0
-
-    rpd = np.abs(np.diff(fda_2)) / (np.abs(fda_2[:-1]) + _EPS)
-    final_score = rpd / np.diff(vgs_mid2)
-    vgs_mid3 = vgs_mid2[1:]
-
-    return vgs_mid3, fda_2, final_score
-
-
-def get_discontinuity_indices(final_score: np.ndarray, threshold: float) -> np.ndarray:
-    """Return indices of ``final_score`` that exceed ``threshold``.
-
-    Parameters
-    ----------
-    final_score:
-        1-D score array (e.g. from ``detect_discontinuities_higher_order``).
-    threshold:
-        Minimum score value to flag.
-
-    Returns
-    -------
-    np.ndarray
-        Integer array of flagged indices.
-    """
-    return np.where(final_score > threshold)[0]
-
-
-# ---------------------------------------------------------------------------
-# Robust detector
-# ---------------------------------------------------------------------------
-
-
 def score_series(
     x: np.ndarray, y: np.ndarray
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -258,11 +110,11 @@ def score_series(
         raise ValueError("x and y must have the same shape.")
 
     dx = np.diff(x)
-    fda_1 = np.diff(y) / dx
+    fda_1 = np.diff(y) / np.where(np.abs(dx) < _EPS, _EPS, dx)
     x_mid1 = (x[:-1] + x[1:]) / 2.0
 
     dx_mid1 = np.diff(x_mid1)
-    fda_2 = np.diff(fda_1) / dx_mid1
+    fda_2 = np.diff(fda_1) / np.where(np.abs(dx_mid1) < _EPS, _EPS, dx_mid1)
     x_mid2 = (x_mid1[:-1] + x_mid1[1:]) / 2.0
 
     dx_mid2 = np.diff(x_mid2)
@@ -365,89 +217,33 @@ def detect_robust(
     )
 
 
-# ---------------------------------------------------------------------------
-# Method dispatch
-# ---------------------------------------------------------------------------
-
-
-def _detect_simple(x: np.ndarray, y: np.ndarray, *, threshold: float) -> DetectionResult:
-    if threshold <= 0:
-        raise ValueError("threshold must be positive for the 'simple' method.")
-    y = np.asarray(y, dtype=float)
-    x = np.asarray(x, dtype=float)
-    if y.size < 2:
-        empty = np.empty(0)
-        return DetectionResult(
-            x=x, fda_2=empty, score=empty, indices=np.empty(0, dtype=int),
-            threshold=threshold, method="simple",
-        )
-    deltas = np.abs(np.diff(y))
-    # Align score with y[1:] so indices map back to the original sample index.
-    indices = np.where(deltas >= threshold)[0] + 1
-    return DetectionResult(
-        x=x,
-        fda_2=np.empty(0),
-        score=np.concatenate(([0.0], deltas)),
-        indices=indices,
-        threshold=float(threshold),
-        method="simple",
-    )
-
-
-def _detect_higher_order(
-    x: np.ndarray, y: np.ndarray, *, threshold: float
+def detect(
+    x: np.ndarray,
+    y: np.ndarray,
+    *,
+    sigma: float = 50.0,
+    min_prominence: float = 20.0,
+    min_separation: int = 3,
 ) -> DetectionResult:
-    x_mid3, fda_2, score = detect_discontinuities_higher_order(x, y)
-    if threshold <= 0:
-        raise ValueError("threshold must be positive for the 'higher_order' method.")
-    indices = get_discontinuity_indices(score, threshold)
-    return DetectionResult(
-        x=x_mid3,
-        fda_2=fda_2,
-        score=score,
-        indices=indices,
-        threshold=float(threshold),
-        method="higher_order",
-    )
-
-
-def detect(method: str, x: np.ndarray, y: np.ndarray, **params) -> DetectionResult:
-    """Dispatch to the named detection method.
+    """Detect discontinuities using the robust detector.
 
     Parameters
     ----------
-    method:
-        One of ``"simple"``, ``"higher_order"``, or ``"robust"``.
     x:
-        Independent axis array (e.g. gate voltage), length N.
+        Independent axis array (e.g. gate voltage), length N >= 4.
     y:
-        Dependent axis array (e.g. drain current), length N.
-    **params:
-        Method-specific keyword arguments:
-
-        - ``"simple"``: ``threshold`` (float, required, > 0)
-        - ``"higher_order"``: ``threshold`` (float, required, > 0)
-        - ``"robust"``: ``sigma`` (float, default 50.0),
-          ``min_prominence`` (float, default 20.0),
-          ``min_separation`` (int, default 3)
-
-    Returns
-    -------
-    DetectionResult
-        Structured result with score, flagged indices, and method metadata.
-
-    Raises
-    ------
-    ValueError
-        If *method* is unknown, or if ``threshold <= 0`` for simple/higher_order,
-        or if the input is too short for the chosen method.
+        Dependent axis array (e.g. drain current), length N >= 4.
+    sigma:
+        Minimum MAD-z-score height for a peak to be flagged.
+    min_prominence:
+        Minimum peak prominence above surrounding valleys.
+    min_separation:
+        Minimum index distance between flagged peaks.
     """
-    if method == "simple":
-        return _detect_simple(x, y, **params)
-    if method == "higher_order":
-        return _detect_higher_order(x, y, **params)
-    if method == "robust":
-        return detect_robust(x, y, **params)
-    raise ValueError(
-        f"unknown method '{method}' (expected 'simple', 'higher_order', or 'robust')"
+    return detect_robust(
+        x,
+        y,
+        sigma=sigma,
+        min_prominence=min_prominence,
+        min_separation=min_separation,
     )

@@ -12,7 +12,7 @@
 | `y_value` | Dependent-axis value at that point — e.g. drain current I_D in amperes |
 | `score` | MAD z-score at the flagged point. Unitless. Default threshold is 5; healthy curvature variations typically stay below ~20; sharp injected faults produce values in the hundreds or higher |
 | `threshold` | Minimum score required to flag a point (configurable via `[detection].sensitivity` or `-s`) |
-| `method` | Detection algorithm used — `robust`, `simple`, or `higher_order` |
+| `method` | Detection algorithm used — always `robust` |
 
 ## Why scores can be very large (e.g. over 300,000)
 

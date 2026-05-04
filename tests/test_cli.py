@@ -10,35 +10,38 @@ class TestSpiceFindCli(unittest.TestCase):
     def test_file_input(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "data.csv"
-            path.write_text("vout\n1.0\n1.1\n2.5\n", encoding="utf-8")
+            path.write_text(
+                "vout\n0.0\n0.1\n0.2\n0.3\n10.0\n10.1\n10.2\n10.3\n",
+                encoding="utf-8",
+            )
 
             out = io.StringIO()
             err = io.StringIO()
             code = main(
-                ["--method", "simple", "-s", "1.0", str(path)],
+                ["-s", "1.0", "--min-prominence", "1", "--min-separation", "1", str(path)],
                 stdout=out,
                 stderr=err,
             )
 
             self.assertEqual(code, 0)
             self.assertIn("Analyzed 1 numeric column(s).", out.getvalue())
-            self.assertIn("vout: 1", out.getvalue())
+            self.assertRegex(out.getvalue(), r"vout: [1-9]\d*")
             self.assertEqual("", err.getvalue())
 
     def test_stdin_input(self) -> None:
         out = io.StringIO()
         err = io.StringIO()
-        stdin = io.StringIO("idrain\n0\n0.1\n2.3\n")
+        stdin = io.StringIO("idrain\n0\n0.1\n0.2\n0.3\n5.0\n5.1\n5.2\n")
 
         code = main(
-            ["--method", "simple", "-s", "2.0"],
+            ["-s", "1.0", "--min-prominence", "1", "--min-separation", "1"],
             stdin=stdin,
             stdout=out,
             stderr=err,
         )
 
         self.assertEqual(code, 0)
-        self.assertIn("idrain: 1", out.getvalue())
+        self.assertRegex(out.getvalue(), r"idrain: [1-9]\d*")
         self.assertEqual("", err.getvalue())
 
     def test_invalid_threshold(self) -> None:
@@ -47,7 +50,7 @@ class TestSpiceFindCli(unittest.TestCase):
         stdin = io.StringIO("v\n1\n2\n")
 
         code = main(
-            ["--method", "simple", "-s", "0"],
+            ["-s", "0"],
             stdin=stdin,
             stdout=out,
             stderr=err,
@@ -62,7 +65,7 @@ class TestSpiceFindCli(unittest.TestCase):
         stdin = io.StringIO("")
 
         code = main(
-            ["--method", "simple", "-s", "1.0"],
+            ["-s", "1.0"],
             stdin=stdin,
             stdout=out,
             stderr=err,
@@ -82,7 +85,7 @@ class TestSpiceFindCli(unittest.TestCase):
         stdin = io.StringIO("\n".join(lines) + "\n")
 
         code = main(
-            ["--method", "robust"],
+            [],
             stdin=stdin,
             stdout=out,
             stderr=err,

@@ -38,21 +38,18 @@ Default detection parameters. CLI flags override these.
 
 | Key | Type | Default | Applies to |
 |---|---|---|---|
-| `method` | string | `"robust"` | All methods |
-| `sensitivity` | float | 50.0 (robust), required (simple/higher_order) | All methods |
+| `sensitivity` | float | 50.0 | Robust detector |
 | `min_prominence` | float | 20.0 | `robust` only |
 | `min_separation` | int | 3 | `robust` only |
 
 ```yaml
 detection:
-  method: "robust"
   sensitivity: 50.0
   min_prominence: 20.0
   min_separation: 3
 ```
 
-- **`method`**: `"simple"` | `"higher_order"` | `"robust"`. See [SIMPLE.md](SIMPLE.md), [HIGHER_ORDER.md](HIGHER_ORDER.md), [ROBUST.md](ROBUST.md).
-- **`sensitivity`**: For `simple`/`higher_order`, a raw score threshold (must be > 0). For `robust`, the MAD-z-score threshold (sigma multiplier).
+- **`sensitivity`**: Robust MAD-z-score threshold (sigma multiplier). Must be > 0.
 - **`min_prominence`**: Robust only. Minimum height a peak must rise above the surrounding valleys to be flagged. Prevents clustered false positives.
 - **`min_separation`**: Robust only. Minimum index distance between two flagged peaks.
 

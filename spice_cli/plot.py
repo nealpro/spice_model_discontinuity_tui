@@ -1,15 +1,16 @@
-"""Focused Ids/Vgs plotting for SPICE discontinuity analysis.
+"""Generic discontinuity plots.
 
-Produces exactly four views:
+Produces up to four views per analyzed column:
 
-    iv_full.jpg     — Ids vs Vgs, one curve per filtered group
-    iv_zoom.jpg     — Ids vs Vgs, x-windowed around merged discontinuity regions
-    fda2_full.jpg   — d²Ids/dVgs² vs Vgs, same groups
-    fda2_zoom.jpg   — d²Ids/dVgs², same x-window as iv_zoom
+    <col>_full.jpg      — y vs x, one curve per group (full range)
+    <col>_zoom.jpg      — y vs x, x-windowed around discontinuity regions
+    <col>_fda2_full.jpg — d²y/dx², full range
+    <col>_fda2_zoom.jpg — d²y/dx², same window as zoom
+
+All files land in ``<output_dir>/PLOTS/``.
 
 Group filtering (family-of-curves) is driven by ``plots.grouping`` in the
-user YAML config, mirroring the VBULK filter knobs the user has been using
-manually. The zoom pair is skipped when no group flags any discontinuity.
+user YAML config. The zoom pair is skipped when no group flags any discontinuity.
 """
 
 from __future__ import annotations
@@ -20,7 +21,6 @@ from typing import Any, Mapping
 
 import numpy as np
 
-from .devices import Device
 from spice_discontinuity.find import DetectionResult
 
 _TOL = 1e-6
@@ -38,12 +38,12 @@ def _lazy_plt():
 
 @dataclass(frozen=True)
 class PlotConfig:
-    """All plot knobs for IV-curve rendering.
+    """All plot knobs for generic column rendering.
 
     Populate via ``load_plot_config``. Two subsystems share this config:
 
-    - **Axis formatting**: ``figsize``, ``dpi``, ``ids_ylabel``, ``ids_unit_scale``,
-      ``vgs_xlabel``, ``vgs_xlim``, ``vgs_tick_step``, ``zoom_padding``,
+    - **Axis formatting**: ``figsize``, ``dpi``, ``ylabel``, ``unit_scale``,
+      ``xlabel``, ``xlim``, ``tick_step``, ``zoom_padding``,
       ``zoom_merge_within``, ``title_prefix``.
     - **Family-of-curves grouping**: ``grouping_field``, ``grouping_column``,
       ``group_min``, ``group_max``, ``group_step``, ``group_skip``,
@@ -53,11 +53,11 @@ class PlotConfig:
     output_dir: Path
     figsize: tuple[float, float] = (16.0, 9.0)
     dpi: int = 200
-    ids_ylabel: str = r"$I_D$"
-    ids_unit_scale: float = 1.0
-    vgs_xlabel: str = r"$V_{GS}$ (V)"
-    vgs_xlim: tuple[float, float] | None = None
-    vgs_tick_step: float | None = None
+    ylabel: str = ""
+    unit_scale: float = 1.0
+    xlabel: str = ""
+    xlim: tuple[float, float] | None = None
+    tick_step: float | None = None
     zoom_padding: float = 0.05
     zoom_merge_within: float = 0.02
     grouping_field: str | None = None
@@ -78,7 +78,6 @@ def _as_float_list(values: Any) -> list[float]:
 
 def load_plot_config(
     config: Mapping[str, Any],
-    device: Device | None,
     *,
     fallback_output_dir: Path | None = None,
 ) -> PlotConfig:
@@ -88,24 +87,20 @@ def load_plot_config(
     ----------
     config:
         Parsed YAML config dict.
-    device:
-        Active device, used to resolve semantic field names in ``plots.grouping``.
-        Pass ``None`` if no device is active.
     fallback_output_dir:
-        Base directory to use when neither ``plots.output_dir`` nor
-        ``io.output_dir`` is set.
-        Plots land in ``<fallback_output_dir>/plots/``.
+        Base directory when neither ``plots.output_dir`` nor ``io.output_dir``
+        is set. Plots land in ``<fallback_output_dir>/PLOTS/``.
 
     Returns
     -------
     PlotConfig
-        Populated plot configuration.
+        Populated plot configuration with output_dir set to ``…/PLOTS``.
 
     Raises
     ------
     ValueError
-        If no output directory can be resolved and *fallback_output_dir* is None.
-        Also raised if ``figsize`` or ``vgs_xlim`` are not two-element sequences.
+        If no output directory can be resolved and *fallback_output_dir* is None,
+        or if ``figsize`` / ``xlim`` are not two-element sequences.
     """
     plots = dict(config.get("plots") or {})
     grouping_raw = dict(plots.pop("grouping", None) or {})
@@ -116,49 +111,44 @@ def load_plot_config(
     )
     if output_dir_raw is None:
         if fallback_output_dir is not None:
-            output_dir = fallback_output_dir / "plots"
+            base = fallback_output_dir
         else:
             raise ValueError(
                 "plot output directory not set; define [plots].output_dir or "
                 "[io].output_dir in config."
             )
     else:
-        output_dir = Path(output_dir_raw).expanduser()
+        base = Path(output_dir_raw).expanduser()
+
+    output_dir = base / "PLOTS"
 
     figsize = plots.get("figsize")
     figsize_tuple = tuple(_as_float_list(figsize)) if figsize else (16.0, 9.0)
     if len(figsize_tuple) != 2:
         raise ValueError("[plots].figsize must be a pair of numbers.")
 
-    xlim_raw = plots.get("vgs_xlim")
+    xlim_raw = plots.get("xlim")
     xlim = tuple(_as_float_list(xlim_raw)) if xlim_raw else None
     if xlim is not None and len(xlim) != 2:
-        raise ValueError("[plots].vgs_xlim must be a pair of numbers.")
+        raise ValueError("[plots].xlim must be a pair of numbers.")
 
-    semantic_field = grouping_raw.get("field")
-    csv_column: str | None = None
-    if semantic_field:
-        if device is not None and semantic_field in device.fields:
-            csv_column = device.fields[semantic_field]
-        else:
-            csv_column = semantic_field
+    grouping_col = grouping_raw.get("column") or grouping_raw.get("field") or None
 
     return PlotConfig(
         output_dir=output_dir,
         figsize=figsize_tuple,  # type: ignore[arg-type]
         dpi=int(plots.get("dpi", 200)),
-        ids_ylabel=str(plots.get("ids_ylabel", r"$I_D$")),
-        ids_unit_scale=float(plots.get("ids_unit_scale", 1.0)),
-        vgs_xlabel=str(plots.get("vgs_xlabel", r"$V_{GS}$ (V)")),
-        vgs_xlim=xlim,  # type: ignore[arg-type]
-        vgs_tick_step=(
-            float(plots["vgs_tick_step"]) if plots.get("vgs_tick_step") is not None
-            else None
+        ylabel=str(plots.get("ylabel", "")),
+        unit_scale=float(plots.get("unit_scale", 1.0)),
+        xlabel=str(plots.get("xlabel", "")),
+        xlim=xlim,  # type: ignore[arg-type]
+        tick_step=(
+            float(plots["tick_step"]) if plots.get("tick_step") is not None else None
         ),
         zoom_padding=float(plots.get("zoom_padding", 0.05)),
         zoom_merge_within=float(plots.get("zoom_merge_within", 0.02)),
-        grouping_field=semantic_field,
-        grouping_column=csv_column,
+        grouping_field=grouping_col,
+        grouping_column=grouping_col,
         group_min=(
             float(grouping_raw["min"]) if grouping_raw.get("min") is not None else None
         ),
@@ -234,7 +224,7 @@ def _merge_intervals(
 
 
 def _discontinuity_windows(
-    detections: Mapping[float, DetectionResult], config: PlotConfig
+    detections: Mapping[float | None, DetectionResult], config: PlotConfig
 ) -> list[tuple[float, float]]:
     x_values: list[float] = []
     for result in detections.values():
@@ -255,16 +245,16 @@ def _discontinuity_windows(
     return _merge_intervals(raw, config.zoom_merge_within)
 
 
-def _apply_common_axes(ax, config: PlotConfig, xlim: tuple[float, float] | None):
+def _apply_common_axes(ax, config: PlotConfig, xlim: tuple[float, float] | None, xlabel: str):
     ax.grid(True, which="both", linestyle="--", alpha=0.4)
     ax.axvline(0, color="black", linewidth=0.8)
     ax.axhline(0, color="black", linewidth=0.8)
-    ax.set_xlabel(config.vgs_xlabel, fontsize=12)
+    ax.set_xlabel(xlabel or "x", fontsize=12)
     if xlim is not None:
         ax.set_xlim(*xlim)
-        if config.vgs_tick_step:
+        if config.tick_step:
             ax.set_xticks(
-                np.arange(xlim[0], xlim[1] + config.vgs_tick_step / 2, config.vgs_tick_step)
+                np.arange(xlim[0], xlim[1] + config.tick_step / 2, config.tick_step)
             )
 
 
@@ -279,20 +269,22 @@ def _label_for(value: float | None, config: PlotConfig) -> str:
         return f"{config.grouping_field or 'group'} = {value:.3g}"
 
 
-def _plot_ids(
+def _plot_y(
     ax,
-    groups: Mapping[float, tuple[np.ndarray, np.ndarray]],
-    detections: Mapping[float, DetectionResult],
+    groups: Mapping[float | None, tuple[np.ndarray, np.ndarray]],
+    detections: Mapping[float | None, DetectionResult],
     config: PlotConfig,
     xlim: tuple[float, float] | None,
+    xlabel: str,
+    ylabel: str,
     *,
     flag_markers: bool,
 ) -> None:
-    for value in sorted(groups):
-        vgs, ids = groups[value]
+    for value in sorted(groups, key=lambda k: (k is None, k or 0.0)):
+        x_arr, y_arr = groups[value]
         ax.plot(
-            vgs,
-            ids * config.ids_unit_scale,
+            x_arr,
+            y_arr * config.unit_scale,
             marker="o",
             markersize=2.5,
             linewidth=1.2,
@@ -307,36 +299,36 @@ def _plot_ids(
             ]
             if idx.size == 0:
                 continue
-            i_snap = np.searchsorted(vgs, result.x[idx])
-            i_snap = np.clip(i_snap, 0, len(vgs) - 1)
+            i_snap = np.searchsorted(x_arr, result.x[idx])
+            i_snap = np.clip(i_snap, 0, len(x_arr) - 1)
             i_a = i_snap
             i_b = np.maximum(i_snap - 1, 0)
-            N = len(vgs)
+            N = len(x_arr)
             lo_a = np.clip(i_a - 1, 0, N - 1)
             hi_a = np.clip(i_a + 1, 0, N - 1)
-            dev_a = np.abs(ids[i_a] - (ids[lo_a] + ids[hi_a]) / 2.0)
+            dev_a = np.abs(y_arr[i_a] - (y_arr[lo_a] + y_arr[hi_a]) / 2.0)
             lo_b = np.clip(i_b - 1, 0, N - 1)
             hi_b = np.clip(i_b + 1, 0, N - 1)
-            dev_b = np.abs(ids[i_b] - (ids[lo_b] + ids[hi_b]) / 2.0)
+            dev_b = np.abs(y_arr[i_b] - (y_arr[lo_b] + y_arr[hi_b]) / 2.0)
             best = np.where(dev_a >= dev_b, i_a, i_b)
-            flagged_x = vgs[best]
-            flagged_y = ids[best] * config.ids_unit_scale
-            ax.scatter(
-                flagged_x, flagged_y, color="red", s=28, zorder=5, label=None,
-            )
-    _apply_common_axes(ax, config, xlim)
-    ax.set_ylabel(config.ids_ylabel, fontsize=12)
+            flagged_x = x_arr[best]
+            flagged_y = y_arr[best] * config.unit_scale
+            ax.scatter(flagged_x, flagged_y, color="red", s=28, zorder=5, label=None)
+    _apply_common_axes(ax, config, xlim, xlabel)
+    ax.set_ylabel(ylabel or "y", fontsize=12)
 
 
 def _plot_fda2(
     ax,
-    detections: Mapping[float, DetectionResult],
+    detections: Mapping[float | None, DetectionResult],
     config: PlotConfig,
     xlim: tuple[float, float] | None,
+    xlabel: str,
+    fda2_ylabel: str,
     *,
     flag_markers: bool,
 ) -> None:
-    for value in sorted(detections):
+    for value in sorted(detections, key=lambda k: (k is None, k or 0.0)):
         result = detections[value]
         if result.fda_2.size == 0:
             continue
@@ -365,36 +357,47 @@ def _plot_fda2(
                     s=28,
                     zorder=5,
                 )
-    _apply_common_axes(ax, config, xlim)
-    ax.set_ylabel(r"$d^2 I_D / dV_{GS}^2$", fontsize=12)
+    _apply_common_axes(ax, config, xlim, xlabel)
+    ax.set_ylabel(fda2_ylabel, fontsize=12)
 
 
-def render_iv_plots(
-    groups: Mapping[float, tuple[np.ndarray, np.ndarray]],
-    detections: Mapping[float, DetectionResult],
+_SAFE_NAME_RE = __import__("re").compile(r"[^A-Za-z0-9._-]+")
+
+
+def _safe_name(name: str) -> str:
+    cleaned = _SAFE_NAME_RE.sub("_", name).strip("_")
+    return cleaned or "column"
+
+
+def render_plots(
+    groups: Mapping[float | None, tuple[np.ndarray, np.ndarray]],
+    detections: Mapping[float | None, DetectionResult],
     *,
+    col_name: str,
     config: PlotConfig,
+    x_col_name: str = "",
 ) -> list[Path]:
-    """Render the four focused IV-curve plots and return their paths.
-
-    Only valid for DC sweep data (one independent axis, one or more grouped
-    dependent axes).
+    """Render up to four plots for one analyzed column and return their paths.
 
     Parameters
     ----------
     groups:
-        ``{group_value: (x_array, y_array)}`` — sorted arrays per group.
+        ``{group_value_or_None: (x_array, y_array)}`` — sorted arrays per group.
     detections:
-        ``{group_value: DetectionResult}`` — detection output per group.
+        ``{group_value_or_None: DetectionResult}`` — detection output per group.
+    col_name:
+        Name of the y column being plotted. Used for file names and default
+        axis label.
     config:
         Plot configuration including output directory and axis formatting.
+    x_col_name:
+        Name of the independent (x) column, used as the default x-axis label.
 
     Returns
     -------
     list[Path]
-        Paths of written JPEG files (up to four: full and zoom pairs for
-        IV and second-derivative plots). Zoom plots are omitted when no
-        discontinuities are detected.
+        Paths of written JPEG files (up to four). Zoom plots are omitted when
+        no discontinuities are detected.
     """
     plt = _lazy_plt()
     config.output_dir.mkdir(parents=True, exist_ok=True)
@@ -402,8 +405,13 @@ def render_iv_plots(
     if not groups:
         return []
 
+    safe = _safe_name(col_name)
     windows = _discontinuity_windows(detections, config)
     title_tag = f"{config.title_prefix} ".lstrip()
+
+    xlabel = config.xlabel or x_col_name or "x"
+    ylabel = config.ylabel or col_name
+    fda2_ylabel = f"d²{col_name}/dx²"
 
     def legend_title() -> str:
         return config.grouping_field or ""
@@ -422,28 +430,22 @@ def render_iv_plots(
     written: list[Path] = []
 
     fig, ax = plt.subplots(figsize=config.figsize)
-    _plot_ids(ax, groups, detections, config, config.vgs_xlim, flag_markers=True)
-    written.append(_save(fig, ax, "iv_full.jpg", r"$I_D$ vs $V_{GS}$ (full)"))
+    _plot_y(ax, groups, detections, config, config.xlim, xlabel, ylabel, flag_markers=True)
+    written.append(_save(fig, ax, f"{safe}_full.jpg", f"{col_name} (full)"))
 
     fig, ax = plt.subplots(figsize=config.figsize)
-    _plot_fda2(ax, detections, config, config.vgs_xlim, flag_markers=True)
-    written.append(
-        _save(fig, ax, "fda2_full.jpg", r"$d^2 I_D/dV_{GS}^2$ (full)")
-    )
+    _plot_fda2(ax, detections, config, config.xlim, xlabel, fda2_ylabel, flag_markers=True)
+    written.append(_save(fig, ax, f"{safe}_fda2_full.jpg", f"d²{col_name}/dx² (full)"))
 
     if windows:
         zoom_xlim = (windows[0][0], windows[-1][1])
 
         fig, ax = plt.subplots(figsize=config.figsize)
-        _plot_ids(ax, groups, detections, config, zoom_xlim, flag_markers=True)
-        written.append(
-            _save(fig, ax, "iv_zoom.jpg", r"$I_D$ vs $V_{GS}$ (zoom)")
-        )
+        _plot_y(ax, groups, detections, config, zoom_xlim, xlabel, ylabel, flag_markers=True)
+        written.append(_save(fig, ax, f"{safe}_zoom.jpg", f"{col_name} (zoom)"))
 
         fig, ax = plt.subplots(figsize=config.figsize)
-        _plot_fda2(ax, detections, config, zoom_xlim, flag_markers=True)
-        written.append(
-            _save(fig, ax, "fda2_zoom.jpg", r"$d^2 I_D/dV_{GS}^2$ (zoom)")
-        )
+        _plot_fda2(ax, detections, config, zoom_xlim, xlabel, fda2_ylabel, flag_markers=True)
+        written.append(_save(fig, ax, f"{safe}_fda2_zoom.jpg", f"d²{col_name}/dx² (zoom)"))
 
     return written

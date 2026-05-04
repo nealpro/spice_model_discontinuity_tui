@@ -404,6 +404,7 @@ def render_iv_plots(
 
     windows = _discontinuity_windows(detections, config)
     title_tag = f"{config.title_prefix} ".lstrip()
+    vgs_var = config.vgs_xlabel.removesuffix(" (V)")
 
     def legend_title() -> str:
         return config.grouping_field or ""
@@ -423,12 +424,12 @@ def render_iv_plots(
 
     fig, ax = plt.subplots(figsize=config.figsize)
     _plot_ids(ax, groups, detections, config, config.vgs_xlim, flag_markers=True)
-    written.append(_save(fig, ax, "iv_full.jpg", r"$I_D$ vs $V_{GS}$ (full)"))
+    written.append(_save(fig, ax, "iv_full.jpg", rf"$I_D$ vs {vgs_var} (full)"))
 
     fig, ax = plt.subplots(figsize=config.figsize)
     _plot_fda2(ax, detections, config, config.vgs_xlim, flag_markers=True)
     written.append(
-        _save(fig, ax, "fda2_full.jpg", r"$d^2 I_D/dV_{GS}^2$ (full)")
+        _save(fig, ax, "fda2_full.jpg", rf"$d^2 I_D/d{vgs_var}^2$ (full)")
     )
 
     if windows:
@@ -437,13 +438,13 @@ def render_iv_plots(
         fig, ax = plt.subplots(figsize=config.figsize)
         _plot_ids(ax, groups, detections, config, zoom_xlim, flag_markers=True)
         written.append(
-            _save(fig, ax, "iv_zoom.jpg", r"$I_D$ vs $V_{GS}$ (zoom)")
+            _save(fig, ax, "iv_zoom.jpg", rf"$I_D$ vs {vgs_var} (zoom)")
         )
 
         fig, ax = plt.subplots(figsize=config.figsize)
         _plot_fda2(ax, detections, config, zoom_xlim, flag_markers=True)
         written.append(
-            _save(fig, ax, "fda2_zoom.jpg", r"$d^2 I_D/dV_{GS}^2$ (zoom)")
+            _save(fig, ax, "fda2_zoom.jpg", rf"$d^2 I_D/d{vgs_var}^2$ (zoom)")
         )
 
     return written

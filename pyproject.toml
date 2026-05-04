@@ -3,7 +3,7 @@ requires = ["uv_build>=0.11.7,<0.12"]
 build-backend = "uv_build"
 
 [project]
-name = "spice-discontinuity"
+name = "discont-finder"
 version = "0.1.1"
 description = "Toolkit scaffold for finding, generating, and injecting SPICE simulation discontinuities."
 readme = "README.md"

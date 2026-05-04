@@ -24,13 +24,13 @@ uv tool install .
 ### Run the CLI
 
 ```bash
-spice-cli path/to/data.csv
+discont-finder path/to/data.csv
 ```
 
 You can also read from stdin:
 
 ```bash
-cat path/to/data.csv | spice-cli -
+cat path/to/data.csv | discont-finder -
 ```
 
 Useful flags:
@@ -46,6 +46,7 @@ Method details:
 - [`docs/SIMPLE.md`](docs/SIMPLE.md)
 - [`docs/HIGHER_ORDER.md`](docs/HIGHER_ORDER.md)
 - [`docs/ROBUST.md`](docs/ROBUST.md)
+- [`docs/robust_deep_dive.typ`](docs/robust_deep_dive.typ)
 
 If a device is configured, the CLI maps semantic fields from YAML into CSV
 columns and analyzes each dependent field against the declared independent

@@ -27,7 +27,7 @@ _HELP_FORMAT_TOPICS: dict[str, str] = {
 CONFIG FILE FORMAT
 ==================
 Default path: ~/.config/spice_cli/config.yaml
-Override with: spice-cli -c /path/to/config.yaml
+Override with: discont-finder -c /path/to/config.yaml
 Format: YAML
 
 Sections recognized:
@@ -100,7 +100,7 @@ Activate in config:
     device: "NFET"
 
 Or per-run with the --device flag:
-  spice-cli data.csv --device NFET
+  discont-finder data.csv --device NFET
 
 Adding a new device type requires only a YAML change — no code change.\
 """,
@@ -125,11 +125,11 @@ Minimal example:
   0.2,2.10e-8,0.5
 
 Reading from a file:
-  spice-cli data.csv
+  discont-finder data.csv
 
 Reading from stdin:
-  cat data.csv | spice-cli -
-  spice-cli -          (then paste and press Ctrl-D)\
+  cat data.csv | discont-finder -
+  discont-finder -          (then paste and press Ctrl-D)\
 """,
     "plots": """\
 PLOTS FORMAT
@@ -205,9 +205,9 @@ def _load_config(path: Path | None = None) -> dict[str, Any]:
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    """Build the argument parser for spice-cli."""
+    """Build the argument parser for discont-finder."""
     parser = argparse.ArgumentParser(
-        prog="spice-cli",
+        prog="discont-finder",
         description=(
             "Find discontinuities in numeric columns of a SPICE CSV output file.\n\n"
             "INPUT FORMAT:\n"
@@ -221,14 +221,14 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
         epilog=(
             "EXAMPLES:\n"
-            "  spice-cli data.csv\n"
-            "  spice-cli data.csv --method simple -s 1e-4\n"
-            "  spice-cli data.csv --method robust -s 30 --min-prominence 10\n"
-            "  spice-cli data.csv -p\n"
-            "  spice-cli data.csv --device FET -p\n"
-            "  spice-cli data.csv -c ~/myproject/config.yaml\n"
-            "  cat data.csv | spice-cli -\n"
-            "  spice-cli data.csv --inject -o faulted.csv --count 5 --seed 42\n\n"
+            "  discont-finder data.csv\n"
+            "  discont-finder data.csv --method simple -s 1e-4\n"
+            "  discont-finder data.csv --method robust -s 30 --min-prominence 10\n"
+            "  discont-finder data.csv -p\n"
+            "  discont-finder data.csv --device FET -p\n"
+            "  discont-finder data.csv -c ~/myproject/config.yaml\n"
+            "  cat data.csv | discont-finder -\n"
+            "  discont-finder data.csv --inject -o faulted.csv --count 5 --seed 42\n\n"
             "Use --help-format <topic> for detailed format documentation.\n"
             "Topics: config, device, csv, plots\n"
         ),
@@ -1057,7 +1057,7 @@ def main(
     stdout: TextIO | None = None,
     stderr: TextIO | None = None,
 ) -> int:
-    """Run the spice-cli workflow.
+    """Run the discont-finder workflow.
 
     Parameters
     ----------

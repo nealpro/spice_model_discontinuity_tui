@@ -16,7 +16,7 @@ uv sync
 Verify the entry point is available:
 
 ```bash
-uv run spice-cli --help
+uv run discont-finder --help
 ```
 
 ---
@@ -26,13 +26,13 @@ uv run spice-cli --help
 Analyze a CSV file:
 
 ```bash
-uv run spice-cli data.csv
+uv run discont-finder data.csv
 ```
 
 Pipe from stdin:
 
 ```bash
-cat data.csv | uv run spice-cli -
+cat data.csv | uv run discont-finder -
 ```
 
 The tool prints a per-column discontinuity summary to stdout and always writes a
@@ -91,7 +91,7 @@ the baseline.
 ## CLI Flags Reference
 
 ```
-usage: spice-cli [options] [input]
+usage: discont-finder [options] [input]
 
 positional:
   input                     CSV file path, or '-' for stdin
@@ -122,7 +122,7 @@ injection:
   --seed INT                RNG seed for reproducibility
 ```
 
-Run `spice-cli --help-format <topic>` for detailed format documentation on any topic.
+Run `discont-finder --help-format <topic>` for detailed format documentation on any topic.
 
 ---
 
@@ -159,7 +159,7 @@ device = "FET"
 Or via flag (overrides config):
 
 ```bash
-uv run spice-cli data.csv --device FET
+uv run discont-finder data.csv --device FET
 ```
 
 **With a device active, the CLI:**
@@ -174,7 +174,7 @@ uv run spice-cli data.csv --device FET
 ## Configuration Reference
 
 Config file: `~/.config/spice_cli/config.toml`  
-Override with: `spice-cli -c /path/to/config.toml`  
+Override with: `discont-finder -c /path/to/config.toml`  
 CLI flags override all config values.
 
 See **[docs/config_reference.md](config_reference.md)** for the full reference with all keys, types, and defaults.
@@ -200,7 +200,7 @@ See `config_examples/config.toml` for a fully annotated example.
 ### Detect discontinuities in an IV sweep
 
 ```bash
-uv run spice-cli data.csv --method robust --sensitivity 30
+uv run discont-finder data.csv --method robust --sensitivity 30
 ```
 
 Lowering `--sensitivity` from the default of 50 catches subtler discontinuities.
@@ -212,7 +212,7 @@ Lowering `--sensitivity` from the default of 50 catches subtler discontinuities.
 1. Configure device settings in `~/.config/spice_cli/config.toml`.
 2. Run with `-p` to enable plots:
    ```bash
-   uv run spice-cli data.csv --device FET -p
+   uv run discont-finder data.csv --device FET -p
    ```
 3. Review the stdout summary, `spice_cli_output/results.csv`, and the four JPEG
    plots written to `spice_cli_output/plots/<device>_<field>/`.
@@ -224,16 +224,16 @@ is present in config.
 
 ```bash
 # Create test data with 5 known spikes
-uv run spice-cli clean.csv --inject -o faulted.csv --count 5 --magnitude 1e-4 --seed 42
+uv run discont-finder clean.csv --inject -o faulted.csv --count 5 --magnitude 1e-4 --seed 42
 
 # Verify the detector finds them
-uv run spice-cli faulted.csv --method robust -s 20
+uv run discont-finder faulted.csv --method robust -s 20
 ```
 
 ### Pipeline usage
 
 ```bash
-cat simulation_output.csv | uv run spice-cli - --device FET
+cat simulation_output.csv | uv run discont-finder - --device FET
 ```
 
 ---

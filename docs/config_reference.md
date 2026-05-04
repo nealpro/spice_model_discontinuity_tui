@@ -5,7 +5,7 @@
 | | Path |
 |---|---|
 | Default | `~/.config/spice_cli/config.yaml` |
-| Override | `spice-cli -c /path/to/config.yaml` |
+| Override | `discont-finder -c /path/to/config.yaml` |
 | Format | YAML |
 
 CLI flags take priority over all config values.

@@ -9,7 +9,7 @@
 | `spice_discontinuity/` | Core detection library — no CLI dependency |
 | `spice_cli/` | CLI tool — uses the core library for I/O, config, and plotting |
 
-The entry point `spice-cli` (defined in `pyproject.toml`) maps to `spice_cli.main()`.
+The entry point `discont-finder` (defined in `pyproject.toml`) maps to `spice_cli.main()`.
 
 ---
 

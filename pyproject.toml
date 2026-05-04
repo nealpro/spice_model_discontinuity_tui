@@ -22,7 +22,7 @@ mcp = [
 ]
 
 [project.scripts]
-spice-cli = "spice_cli:main"
+discont-finder = "spice_cli:main"
 
 [tool.uv.build-backend]
 module-root = "."

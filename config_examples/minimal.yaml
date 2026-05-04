@@ -1,6 +1,6 @@
 io:
   output_dir: "output_directory"
-  files: ["tests/files/generated_demo_discontinuous.csv"]
+  files: ["spice_files"]
 
 detection:
   sensitivity: 1.0 # standard deviations
@@ -8,4 +8,4 @@ detection:
   min_separation: 3
 
 analysis:
-  independent_col: "x" # CSV column to use as the x-axis
+  independent_col: "V(DRAIN)"

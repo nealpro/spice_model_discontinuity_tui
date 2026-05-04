@@ -125,7 +125,7 @@ def score_series(
         sigma_mad = _EPS
 
     score = np.abs(normalized_jump) / sigma_mad
-    x_mid3 = x_mid2[1:]
+    x_mid3 = x_mid2[:-1]
     return x_mid3, fda_2, score
 
 

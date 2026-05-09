@@ -38,8 +38,8 @@ class DetectionResult:
 def load_csv_numeric_columns(path: str | Path) -> dict[str, list[float]]:
     """Load numeric columns from a CSV file.
 
-    A column is included if at least one cell parses as float; non-parseable
-    cells within a numeric column are silently skipped.
+    A column is included if at least one cell parses as float. Non-parseable
+    cells within a numeric column raise ValueError.
 
     Parameters
     ----------
@@ -55,7 +55,8 @@ def load_csv_numeric_columns(path: str | Path) -> dict[str, list[float]]:
     Raises
     ------
     ValueError
-        If the file has no header row or contains no numeric data.
+        If the file has no header row, contains no numeric data, or a
+        non-empty cell in a numeric column cannot be parsed as a number.
     OSError
         If the file cannot be opened.
     """
@@ -66,7 +67,8 @@ def load_csv_numeric_columns(path: str | Path) -> dict[str, list[float]]:
             raise ValueError("CSV file has no header row.")
 
         columns: dict[str, list[float]] = {name: [] for name in reader.fieldnames}
-        for row in reader:
+        errors: list[tuple[str, int, str]] = []
+        for row_num, row in enumerate(reader, start=2):
             for name in reader.fieldnames:
                 raw = (row.get(name) or "").strip()
                 if not raw:
@@ -74,11 +76,16 @@ def load_csv_numeric_columns(path: str | Path) -> dict[str, list[float]]:
                 try:
                     columns[name].append(float(raw))
                 except ValueError:
-                    continue
+                    errors.append((name, row_num, raw))
 
     numeric_columns = {name: values for name, values in columns.items() if values}
     if not numeric_columns:
         raise ValueError("CSV contains no numeric data.")
+    for col, row_num, raw in errors:
+        if col in numeric_columns:
+            raise ValueError(
+                f"row {row_num}: column {col!r}: cannot parse {raw!r} as a number"
+            )
     return numeric_columns
 
 

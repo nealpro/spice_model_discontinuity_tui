@@ -68,10 +68,8 @@ A standard comma-separated file with a header row.
 
 Rules:
   - First row must be the header (column names).
-  - All other rows are data. Rows with non-parseable values in a column
-    are skipped for that column; other columns are unaffected.
-  - A column is treated as numeric if at least one non-empty cell
-    parses as float.
+  - All other rows are data. All entries must be numbers; scientific
+    notation is supported (values may contain 'e', e.g. 1.23e-9).
   - Column names may contain any characters, including spaces, parentheses,
     and special symbols (LTspice-style names are fully supported).
 
@@ -271,7 +269,8 @@ def _load_numeric_columns_from_stream(stream: TextIO) -> dict[str, list[float]]:
         raise ValueError("CSV input has no header row.")
 
     columns: dict[str, list[float]] = {name: [] for name in reader.fieldnames}
-    for row in reader:
+    errors: list[tuple[str, int, str]] = []
+    for row_num, row in enumerate(reader, start=2):
         for name in reader.fieldnames:
             raw = (row.get(name) or "").strip()
             if not raw:
@@ -279,11 +278,16 @@ def _load_numeric_columns_from_stream(stream: TextIO) -> dict[str, list[float]]:
             try:
                 columns[name].append(float(raw))
             except ValueError:
-                continue
+                errors.append((name, row_num, raw))
 
     numeric_columns = {name: values for name, values in columns.items() if values}
     if not numeric_columns:
         raise ValueError("CSV input contains no numeric data.")
+    for col, row_num, raw in errors:
+        if col in numeric_columns:
+            raise ValueError(
+                f"row {row_num}: column {col!r}: cannot parse {raw!r} as a number"
+            )
     return numeric_columns
 
 

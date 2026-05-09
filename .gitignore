@@ -45,5 +45,6 @@ spice_cli_output/
 # Testing files directory
 tests/files/*
 tests/mcp/*
+tests/*
 
 tools/

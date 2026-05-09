@@ -508,6 +508,9 @@ def _generic_column_summary(
     dict
         ``{column_name: {group_value_or_None: (DetectionResult, x_arr, y_arr, row_idxs)}}``.
     """
+    if independent_col is None and columns:
+        independent_col = next(iter(columns))
+
     x_override: np.ndarray | None = None
     if independent_col and independent_col in columns:
         x_override = np.asarray(columns[independent_col], dtype=float)
@@ -907,6 +910,9 @@ def main(
         return 2
 
     try:
+        if independent_col is None and columns:
+            independent_col = next(iter(columns))
+
         if len(resolved_paths) > 1:
             per_file_results: list[tuple[str, dict]] = []
             results: dict = {}
@@ -917,9 +923,10 @@ def main(
                 except (OSError, ValueError) as exc:
                     print(f"warning: skipping {csv_path.name}: {exc}", file=error_stream)
                     continue
+                effective_ic = independent_col or next(iter(file_cols), None)
                 file_res = _generic_column_summary(
                     file_cols, method_params, error_stream,
-                    independent_col=independent_col,
+                    independent_col=effective_ic,
                     group_by_col=group_by_col,
                 )
                 if file_res:

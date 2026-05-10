@@ -3,11 +3,11 @@
 This module only exposes the MAD-normalized robust detector.
 """
 
-import csv
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 from scipy.signal import find_peaks
 
 _EPS = 1e-12
@@ -35,6 +35,39 @@ class DetectionResult:
     method: str
 
 
+def _parse_numeric_columns(
+    df: pd.DataFrame, no_header_msg: str, no_data_msg: str
+) -> dict[str, list[float]]:
+    if df.columns.empty:
+        raise ValueError(no_header_msg)
+
+    result: dict[str, list[float]] = {}
+    errors: list[tuple[str, int, str]] = []
+
+    for col in df.columns:
+        stripped = df[col].str.strip()
+        non_empty = stripped[stripped != ""]
+        if non_empty.empty:
+            continue
+        numeric = pd.to_numeric(non_empty, errors="coerce")
+        good = numeric[numeric.notna()]
+        if not good.empty:
+            result[col] = good.tolist()
+        bad_mask = numeric.isna()
+        if bad_mask.any():
+            first_pos = bad_mask[bad_mask].index[0]
+            errors.append((col, int(first_pos) + 2, non_empty.loc[first_pos]))
+
+    if not result:
+        raise ValueError(no_data_msg)
+    for col, row_num, raw in errors:
+        if col in result:
+            raise ValueError(
+                f"row {row_num}: column {col!r}: cannot parse {raw!r} as a number"
+            )
+    return result
+
+
 def load_csv_numeric_columns(path: str | Path) -> dict[str, list[float]]:
     """Load numeric columns from a CSV file.
 
@@ -60,33 +93,11 @@ def load_csv_numeric_columns(path: str | Path) -> dict[str, list[float]]:
     OSError
         If the file cannot be opened.
     """
-    source = Path(path)
-    with source.open(newline="", encoding="utf-8") as handle:
-        reader = csv.DictReader(handle)
-        if not reader.fieldnames:
-            raise ValueError("CSV file has no header row.")
-
-        columns: dict[str, list[float]] = {name: [] for name in reader.fieldnames}
-        errors: list[tuple[str, int, str]] = []
-        for row_num, row in enumerate(reader, start=2):
-            for name in reader.fieldnames:
-                raw = (row.get(name) or "").strip()
-                if not raw:
-                    continue
-                try:
-                    columns[name].append(float(raw))
-                except ValueError:
-                    errors.append((name, row_num, raw))
-
-    numeric_columns = {name: values for name, values in columns.items() if values}
-    if not numeric_columns:
-        raise ValueError("CSV contains no numeric data.")
-    for col, row_num, raw in errors:
-        if col in numeric_columns:
-            raise ValueError(
-                f"row {row_num}: column {col!r}: cannot parse {raw!r} as a number"
-            )
-    return numeric_columns
+    try:
+        df = pd.read_csv(Path(path), encoding="utf-8", dtype=str, keep_default_na=False)
+    except pd.errors.EmptyDataError:
+        raise ValueError("CSV file has no header row.")
+    return _parse_numeric_columns(df, "CSV file has no header row.", "CSV contains no numeric data.")
 
 
 def score_series(

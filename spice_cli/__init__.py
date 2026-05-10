@@ -12,8 +12,9 @@ from pathlib import Path
 from typing import Any, Sequence, TextIO
 
 import numpy as np
+import pandas as pd
 
-from spice_discontinuity.find import DetectionResult, detect as find_detect
+from spice_discontinuity.find import DetectionResult, _parse_numeric_columns, detect as find_detect
 from spice_discontinuity.inject import inject_random_spikes
 
 _DEFAULT_CONFIG_PATH = Path("~/.config/discontinuity_finder/config.yaml").expanduser()
@@ -264,31 +265,11 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def _load_numeric_columns_from_stream(stream: TextIO) -> dict[str, list[float]]:
     """Parse numeric columns from a CSV stream."""
-    reader = csv.DictReader(stream)
-    if not reader.fieldnames:
+    try:
+        df = pd.read_csv(stream, dtype=str, keep_default_na=False)
+    except pd.errors.EmptyDataError:
         raise ValueError("CSV input has no header row.")
-
-    columns: dict[str, list[float]] = {name: [] for name in reader.fieldnames}
-    errors: list[tuple[str, int, str]] = []
-    for row_num, row in enumerate(reader, start=2):
-        for name in reader.fieldnames:
-            raw = (row.get(name) or "").strip()
-            if not raw:
-                continue
-            try:
-                columns[name].append(float(raw))
-            except ValueError:
-                errors.append((name, row_num, raw))
-
-    numeric_columns = {name: values for name, values in columns.items() if values}
-    if not numeric_columns:
-        raise ValueError("CSV input contains no numeric data.")
-    for col, row_num, raw in errors:
-        if col in numeric_columns:
-            raise ValueError(
-                f"row {row_num}: column {col!r}: cannot parse {raw!r} as a number"
-            )
-    return numeric_columns
+    return _parse_numeric_columns(df, "CSV input has no header row.", "CSV input contains no numeric data.")
 
 
 _SAFE_NAME_RE = re.compile(r"[^A-Za-z0-9._-]+")

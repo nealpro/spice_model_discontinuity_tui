@@ -17,8 +17,6 @@ from spice_discontinuity.inject import inject_random_spikes, inject_step
 # Shared fixtures (built once, reused across benchmarks)
 # ---------------------------------------------------------------------------
 
-_rng = np.random.default_rng(42)
-
 def _make(n: int):
     x = np.linspace(0.0, 1.0, n)
     y = np.sin(2.0 * np.pi * 3.0 * x)

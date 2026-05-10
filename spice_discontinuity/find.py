@@ -96,8 +96,12 @@ def load_csv_numeric_columns(path: str | Path) -> dict[str, list[float]]:
     try:
         df = pd.read_csv(Path(path), encoding="utf-8", dtype=str, keep_default_na=False)
     except pd.errors.EmptyDataError:
-        raise ValueError("CSV file has no header row.")
-    return _parse_numeric_columns(df, "CSV file has no header row.", "CSV contains no numeric data.")
+        raise ValueError("CSV file is empty or has no header row.")
+    return _parse_numeric_columns(
+        df,
+        "CSV file is empty or has no header row.",
+        "CSV contains no numeric data.",
+    )
 
 
 def score_series(

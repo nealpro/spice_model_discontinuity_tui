@@ -69,8 +69,11 @@ A standard comma-separated file with a header row.
 
 Rules:
   - First row must be the header (column names).
-  - All other rows are data. All entries must be numbers; scientific
-    notation is supported (values may contain 'e', e.g. 1.23e-9).
+  - All other rows are data. Columns with numeric values are parsed as
+    numeric; columns that are entirely non-numeric are ignored.
+  - If a column contains numeric data, its data entries must be parseable as
+    numbers; scientific notation is supported (values may contain 'e',
+    e.g. 1.23e-9).
   - Column names may contain any characters, including spaces, parentheses,
     and special symbols (LTspice-style names are fully supported).
 
@@ -269,7 +272,14 @@ def _load_numeric_columns_from_stream(stream: TextIO) -> dict[str, list[float]]:
         df = pd.read_csv(stream, dtype=str, keep_default_na=False)
     except pd.errors.EmptyDataError:
         raise ValueError("CSV input has no header row.")
-    return _parse_numeric_columns(df, "CSV input has no header row.", "CSV input contains no numeric data.")
+    try:
+        return _parse_numeric_columns(
+            df,
+            "CSV input has no header row.",
+            "CSV input contains no numeric data.",
+        )
+    except ValueError as exc:
+        raise ValueError(f"Invalid numeric value in CSV input: {exc}") from exc
 
 
 _SAFE_NAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
@@ -489,7 +499,7 @@ def _generic_column_summary(
     dict
         ``{column_name: {group_value_or_None: (DetectionResult, x_arr, y_arr, row_idxs)}}``.
     """
-    if independent_col is None and columns:
+    if independent_col is None and len(columns) >= 2:
         independent_col = next(iter(columns))
 
     x_override: np.ndarray | None = None

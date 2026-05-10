@@ -23,14 +23,14 @@ Complexities are asymptotic model-level estimates (Big-O), not wall-clock guaran
 
 | Module | Function | Time complexity | Notes |
 | --- | --- | --- | --- |
-| `find.py` | `load_csv_ numeric_columns(path)` | `O(R * M)` | Visits every cell once (parse/skip), builds numeric-column lists. |
+| `find.py` | `load_csv_numeric_columns(path)` | `O(R * M)` | Visits every cell once (parse/skip), builds numeric-column lists. |
 | `find.py` | `_mad(values)` | `O(N log N)` (conservative) | Dominated by two median computations; many NumPy builds are near-linear in practice. |
 | `find.py` | `score_series(x, y)` | `O(N log N)` (conservative) | Mostly linear diff/divide passes; `_mad` dominates under conservative median cost. |
 | `find.py` | `detect_robust(x, y, ...)` | `O(N log N)` (conservative) | `score_series` + finite-mask passes + `find_peaks` (typically near-linear). |
 | `find.py` | `detect(x, y, ...)` | `O(N log N)` (conservative) | Thin wrapper around `detect_robust`. |
 | `inject.py` | `inject_step(values, index, magnitude)` | `O(N)` | List copy is `O(N)`; tail update loop is `O(N-index)`. |
 | `inject.py` | `inject_spike(values, index, magnitude)` | `O(N)` | List copy dominates; one index update is `O(1)`. |
-| `inject.py` | `inject_random _spikes(values, count, ...)` | `O(N + K)` | Copy + random sampling + `K` updates; worst case with `K ~ N` is `O(N)`. |
+| `inject.py` | `inject_random_spikes(values, count, ...)` | `O(N + K)` | Copy + random sampling + `K` updates; worst case with `K ~ N` is `O(N)`. |
 | `inject.py` | `inject_faults(df, fault_percentage)` | `O(N * D + F)` | `F` fault points, but full DataFrame copy drives cost (`D` columns). |
 | `generate.py` | `polynomial(n, coefficients, ...)` | `O(N * C)` | `np.polyval` over `N` samples and polynomial degree/coeff count `C`. |
 | `generate.py` | `sinusoid(n, ...)` | `O(N)` | `linspace` + elementwise `sin`. |

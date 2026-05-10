@@ -31,7 +31,7 @@ Sections recognized:
 
   io:
     output_dir: "spice_cli_output"   # base directory for results.csv and plots
-    files: ["data/signal.csv"]       # fallback file(s) when stdin is a terminal
+    inputs: ["data/signal.csv"]       # fallback file(s) when stdin is a terminal
 
   detection:
     sensitivity: 50.0               # robust z-score sigma threshold
@@ -874,7 +874,7 @@ def main(
         else:
             is_tty = getattr(input_stream, "isatty", lambda: False)
             if is_tty():
-                configured = (config.get("io") or {}).get("files") or []
+                configured = (config.get("io") or {}).get("inputs") or []
                 if configured:
                     for entry in configured:
                         p = Path(entry)
@@ -901,7 +901,7 @@ def main(
         return 2
 
     try:
-        if independent_col is None and columns:
+        if independent_col is None and len(columns) >= 2:
             independent_col = next(iter(columns))
 
         if len(resolved_paths) > 1:

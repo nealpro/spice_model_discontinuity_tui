@@ -19,12 +19,12 @@ Input and output paths.
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `output_dir` | string | `spice_cli_output/` in cwd | Base directory for `results.csv` and all generated files |
-| `files` | array of strings | — | CSV file(s) to use when no file argument is given and stdin is a terminal |
+| `inputs` | array of strings | — | CSV file(s) to use when no file argument is given and stdin is a terminal |
 
 ```yaml
 io:
   output_dir: "spice_cli_output"
-  files:
+  inputs:
     - "data/nmos.csv"
 ```
 

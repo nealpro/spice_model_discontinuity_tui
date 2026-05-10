@@ -12,8 +12,9 @@ from pathlib import Path
 from typing import Any, Sequence, TextIO
 
 import numpy as np
+import pandas as pd
 
-from spice_discontinuity.find import DetectionResult, detect as find_detect
+from spice_discontinuity.find import DetectionResult, _parse_numeric_columns, detect as find_detect
 from spice_discontinuity.inject import inject_random_spikes
 
 _DEFAULT_CONFIG_PATH = Path("~/.config/discontinuity_finder/config.yaml").expanduser()
@@ -68,10 +69,11 @@ A standard comma-separated file with a header row.
 
 Rules:
   - First row must be the header (column names).
-  - All other rows are data. Rows with non-parseable values in a column
-    are skipped for that column; other columns are unaffected.
-  - A column is treated as numeric if at least one non-empty cell
-    parses as float.
+  - All other rows are data. Columns with numeric values are parsed as
+    numeric; columns that are entirely non-numeric are ignored.
+  - If a column contains numeric data, its data entries must be parseable as
+    numbers; scientific notation is supported (values may contain 'e',
+    e.g. 1.23e-9).
   - Column names may contain any characters, including spaces, parentheses,
     and special symbols (LTspice-style names are fully supported).
 
@@ -266,25 +268,18 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def _load_numeric_columns_from_stream(stream: TextIO) -> dict[str, list[float]]:
     """Parse numeric columns from a CSV stream."""
-    reader = csv.DictReader(stream)
-    if not reader.fieldnames:
+    try:
+        df = pd.read_csv(stream, dtype=str, keep_default_na=False)
+    except pd.errors.EmptyDataError:
         raise ValueError("CSV input has no header row.")
-
-    columns: dict[str, list[float]] = {name: [] for name in reader.fieldnames}
-    for row in reader:
-        for name in reader.fieldnames:
-            raw = (row.get(name) or "").strip()
-            if not raw:
-                continue
-            try:
-                columns[name].append(float(raw))
-            except ValueError:
-                continue
-
-    numeric_columns = {name: values for name, values in columns.items() if values}
-    if not numeric_columns:
-        raise ValueError("CSV input contains no numeric data.")
-    return numeric_columns
+    try:
+        return _parse_numeric_columns(
+            df,
+            "CSV input has no header row.",
+            "CSV input contains no numeric data.",
+        )
+    except ValueError as exc:
+        raise ValueError(f"Invalid numeric value in CSV input: {exc}") from exc
 
 
 _SAFE_NAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
@@ -504,6 +499,9 @@ def _generic_column_summary(
     dict
         ``{column_name: {group_value_or_None: (DetectionResult, x_arr, y_arr, row_idxs)}}``.
     """
+    if independent_col is None and len(columns) >= 2:
+        independent_col = next(iter(columns))
+
     x_override: np.ndarray | None = None
     if independent_col and independent_col in columns:
         x_override = np.asarray(columns[independent_col], dtype=float)
@@ -903,6 +901,9 @@ def main(
         return 2
 
     try:
+        if independent_col is None and columns:
+            independent_col = next(iter(columns))
+
         if len(resolved_paths) > 1:
             per_file_results: list[tuple[str, dict]] = []
             results: dict = {}
@@ -913,9 +914,10 @@ def main(
                 except (OSError, ValueError) as exc:
                     print(f"warning: skipping {csv_path.name}: {exc}", file=error_stream)
                     continue
+                effective_ic = independent_col or next(iter(file_cols), None)
                 file_res = _generic_column_summary(
                     file_cols, method_params, error_stream,
-                    independent_col=independent_col,
+                    independent_col=effective_ic,
                     group_by_col=group_by_col,
                 )
                 if file_res:

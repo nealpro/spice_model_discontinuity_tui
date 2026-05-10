@@ -1,11 +1,16 @@
 io:
   output_dir: "output_directory"
-  files: ["spice_files"]
+  inputs: [ # Inputs array
+    "spice_files1/", # Can be a directory
+    "other_dir/specific_file.csv", # Can be a file
+    "spice_files2/" # Path can be relative to current directory or from /
+  ]
 
 detection:
+  # Configures median absolute deviation step 
   sensitivity: 1.0 # standard deviations
-  min_prominence: 20.0 # scipy.find_peaks
+  # Configures scipy.find_peaks
+  min_prominence: 20.0
   min_separation: 3
 
-analysis:
-  independent_col: "V(DRAIN)"
+

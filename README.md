@@ -8,7 +8,7 @@
 
 ## TL;DR
 
-**`discont-finder`** is a Python CLI toolkit that automatically detects anomalies ("discontinuities") in SPICE transistor simulation data. When a semiconductor simulation model misbehaves — producing sudden unexplained jumps or glitches in a device's current-voltage curve — this tool finds them in seconds, rather than requiring an engineer to manually scan thousands of data rows. Developed for NFET IV-curve validation and applied to real-world simulation datasets in collaboration with industry partners.
+**`discont-finder`** is a Python CLI toolkit that automatically detects anomalies ("discontinuities") in SPICE transistor simulation data. When a semiconductor simulation model misbehaves — producing sudden unexplained jumps or glitches in a device's current-voltage curve — this tool finds them in seconds, rather than requiring an engineer to manually scan thousands of data rows. Developed for NFET IV-curve validation and applied to real-world simulation datasets under industry guidance.
 
 ---
 
